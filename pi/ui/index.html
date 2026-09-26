@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>funstation</title>
+<style>
+  :root { --bg: #0d0f1a; --card: #1a1e33; --fg: #eef0ff; --dim: #8a90b8; --hot: #ffcc33; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: radial-gradient(ellipse at top, #1f2547, var(--bg) 70%); color: var(--fg);
+         font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; cursor: default; }
+  header { display: flex; justify-content: space-between; align-items: baseline; padding: 4vh 5vw 0; }
+  h1 { font-size: 5vh; font-weight: 800; letter-spacing: -.03em; }
+  h1 span { color: var(--hot); }
+  #clock { font-size: 4vh; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #row { display: flex; gap: 3vw; padding: 8vh 5vw; overflow-x: auto; scroll-behavior: smooth; scrollbar-width: none; }
+  .card { flex: 0 0 auto; width: 24vh; outline: none; transition: transform .15s; }
+  .art { height: 34vh; border-radius: 2vh; background: var(--card) center/cover no-repeat; display: grid;
+         place-items: center; font-size: 12vh; box-shadow: 0 2vh 4vh #0008; border: .5vh solid transparent; }
+  .card:focus { transform: scale(1.08); }
+  .card:focus .art { border-color: var(--hot); box-shadow: 0 0 6vh #ffcc3355; }
+  .name { margin-top: 2vh; font-size: 2.6vh; text-align: center; color: var(--dim); }
+  .card:focus .name { color: var(--fg); }
+  .jf .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
+  footer { position: fixed; bottom: 4vh; left: 5vw; right: 5vw; color: var(--dim); font-size: 2.2vh; display: flex; gap: 3vw; }
+  b { color: var(--fg); }
+  #busy { position: fixed; inset: 0; background: var(--bg); display: none; place-items: center; font-size: 4vh; }
+</style>
+</head>
+<body>
+<header><h1>fun<span>station</span></h1><div id="clock"></div></header>
+<div id="row"></div>
+<footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>stick</b> mouse</span><span><b>Xbox</b> home</span></footer>
+<div id="busy">Loading…</div>
+<script>
+const row = document.getElementById('row'), busy = document.getElementById('busy');
+const card = (cls, name, art, go) => {
+  const c = document.createElement('div');
+  c.className = 'card ' + cls; c.tabIndex = 0; c.go = go;
+  c.innerHTML = `<div class="art">${art}</div><div class="name"></div>`;
+  c.querySelector('.name').textContent = name;
+  c.onmouseenter = () => c.focus();
+  row.append(c); return c;
+};
+const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
+
+fetch('/api/state').then(r => r.json()).then(s => {
+  if (s.jellyfin) card('jf', 'Jellyfin', '🎬', () => { show(); location = s.jellyfin; });
+  for (const g of s.games) {
+    const c = card('game', g.name, '🎮', () => { show(); fetch('/api/launch', { method: 'POST', body: JSON.stringify({ file: g.file }) }); });
+    const img = new Image(), url = '/cover/' + encodeURIComponent(g.file);
+    img.onload = () => { const a = c.querySelector('.art'); a.style.backgroundImage = `url("${url}")`; a.textContent = ''; };
+    img.src = url;
+  }
+  (row.querySelector('.card') || document.body).focus();
+});
+
+const cards = () => [...row.querySelectorAll('.card')];
+addEventListener('keydown', ev => {
+  const all = cards(), i = all.indexOf(document.activeElement);
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') all[Math.min(i + 1, all.length - 1)]?.focus();
+  else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') all[Math.max(i - 1, 0)]?.focus();
+  else if (ev.key === 'Enter' || ev.key === ' ') document.activeElement.go?.();
+  else return;
+  ev.preventDefault();
+});
+// A (left click) anywhere opens the focused card, so D-pad + A works without aiming the mouse.
+addEventListener('click', ev => (ev.target.closest('.card') || document.activeElement).go?.());
+addEventListener('pageshow', () => busy.style.display = 'none');
+setInterval(() => document.getElementById('clock').textContent =
+  new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 1000);
+</script>
+</body>
+</html>
