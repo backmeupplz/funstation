@@ -28,8 +28,37 @@ echo '{"HomepageLocation":"http://localhost:8080","HomepageIsNewTabPage":false,"
 
 # mGBA: fullscreen, correct 3:2 shape, no pause when focus changes
 install -d -o "$U" -g "$U" "$H/.config" "$H/.config/mgba"
-printf '[ports.sdl]\nfullscreen=1\nlockAspectRatio=1\npauseOnFocusLost=0\n' \
-  | install -m644 -o "$U" -g "$U" /dev/stdin "$H/.config/mgba/config.ini"
+# Xbox pad (SDL button numbers): A/B -> A/B, LB/RB -> L/R, View -> Select, Menu -> Start, D-pad + left stick -> directions
+install -m644 -o "$U" -g "$U" /dev/stdin "$H/.config/mgba/config.ini" <<'EOF'
+[ports.sdl]
+fullscreen=1
+lockAspectRatio=1
+pauseOnFocusLost=0
+
+[gba.input.SDLB]
+keyA=0
+keyB=1
+keyL=6
+keyR=7
+keySelect=10
+keyStart=11
+keyUp=-1
+keyDown=-1
+keyLeft=-1
+keyRight=-1
+hat0Up=6
+hat0Down=7
+hat0Left=5
+hat0Right=4
+axisLeftAxis=-0
+axisLeftValue=-12288
+axisRightAxis=+0
+axisRightValue=12288
+axisUpAxis=-1
+axisUpValue=-12288
+axisDownAxis=+1
+axisDownValue=12288
+EOF
 install -d -o "$U" -g "$U" "$H/roms"
 
 # controller -> virtual mouse/keyboard needs uinput
