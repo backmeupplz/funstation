@@ -23,7 +23,7 @@ install -m644 funstation.env /etc/funstation.env
 
 # Chromium: Alt+Home (sent on Xbox button) returns to the launcher
 install -d /etc/chromium/policies/managed
-echo '{"HomepageLocation":"http://localhost:8080","HomepageIsNewTabPage":false,"TranslateEnabled":false}' \
+echo '{"HomepageLocation":"http://localhost:8080","HomepageIsNewTabPage":false,"TranslateEnabled":false,"PasswordManagerEnabled":false}' \
   > /etc/chromium/policies/managed/funstation.json
 
 # mGBA: fullscreen, correct 3:2 shape, no pause when focus changes
