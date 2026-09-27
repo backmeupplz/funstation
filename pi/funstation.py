@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Funstation: launcher web server + Xbox pad -> mouse/keyboard + app switching."""
-import glob, json, os, select, subprocess, threading, time, urllib.parse, urllib.request
+"""Funstation: launcher backend, app switching (with backgrounding), Xbox pad -> mouse/keyboard, volume OSD."""
+import json, os, queue, select, signal, subprocess, threading, time, urllib.parse, urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import tkinter as tk
 
 import evdev
+import websocket
 from evdev import UInput, ecodes as e
 
 ROMS = os.path.expanduser(os.environ.get("ROMS_DIR", "~/roms"))
 JELLYFIN = os.environ.get("JELLYFIN_URL", "")
+LAUNCHER = "http://localhost:8080/"
+CDP = "http://127.0.0.1:9222"  # Chromium remote debugging, localhost only
 COVERS = os.path.expanduser("~/.cache/funstation/covers")
 SYSTEMS = {".gba": "Nintendo - Game Boy Advance", ".gbc": "Nintendo - Game Boy Color", ".gb": "Nintendo - Game Boy"}
-game = None  # running mgba process
+
+fg = "launcher"      # what's on screen: launcher | jellyfin | <rom file>
+bg = []              # backgrounded apps, most recent last
+games_running = {}   # rom file -> mgba Popen
+lock = threading.RLock()
+osd = queue.Queue()  # volume levels for the on-screen overlay
 
 kbd = UInput({e.EV_KEY: list(range(1, 249))}, name="funstation-kbd")
 mouse = UInput({e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
@@ -43,28 +52,132 @@ def cover(rom):
     return cached
 
 
-def launch(rom):
-    global game
-    if game or rom not in os.listdir(ROMS):
-        return
-    game = subprocess.Popen(["mgba", "-f", os.path.join(ROMS, rom)])
-    threading.Thread(target=lambda: (game.wait(), globals().update(game=None)), daemon=True).start()
+# --- Chromium tabs (launcher and Jellyfin live in separate tabs) -------------------
+def cdp(path, method="GET"):
+    with urllib.request.urlopen(urllib.request.Request(CDP + path, method=method), timeout=5) as r:
+        return r.read()  # JSON for /json/list, plain text for /json/activate
 
 
-def tap(*keys):
-    for k in keys:
-        kbd.write(e.EV_KEY, k, 1)
-    for k in reversed(keys):
-        kbd.write(e.EV_KEY, k, 0)
-    kbd.syn()
+def tab(prefix):
+    return next((t for t in json.loads(cdp("/json/list")) if t["type"] == "page" and t["url"].startswith(prefix)), None)
+
+
+def js(t, expr):
+    ws = websocket.create_connection(t["webSocketDebuggerUrl"], timeout=5, suppress_origin=True)
+    ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expr}}))
+    ws.recv()
+    ws.close()
+
+
+def raise_window(*search):
+    # look the id up first: chained "xdotool search ... windowactivate" silently does nothing under matchbox
+    ids = subprocess.run(["xdotool", "search", *search], capture_output=True, text=True).stdout.split()
+    if ids:
+        subprocess.run(["xdotool", "windowactivate", ids[-1]], stderr=subprocess.DEVNULL)
+
+
+def show_tab(prefix, url):
+    raise_window("--name", " - Chromium$")  # the browser window (Chromium also has unnamed helper windows)
+    t = tab(prefix)
+    if t:
+        return cdp("/json/activate/" + t["id"])
+    cdp("/json/new?" + url, "PUT")
+    if url == JELLYFIN:
+        threading.Thread(target=jellyfin_tv_layout, daemon=True).start()
+
+
+def jellyfin_tv_layout():
+    """Jellyfin's TV layout gives D-pad (arrow key) navigation; it's a per-origin localStorage setting."""
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            js(tab(JELLYFIN), "localStorage.getItem('layout')!=='tv'&&(localStorage.setItem('layout','tv'),location.reload())")
+            return
+        except Exception:
+            pass
+
+
+# --- apps: "launcher", "jellyfin", or a ROM file name ------------------------------------
+def running():
+    try:
+        jf = ["jellyfin"] if JELLYFIN and tab(JELLYFIN) else []
+    except OSError:
+        jf = []
+    return jf + list(games_running)
+
+
+def suspend(app):
+    """Backgrounded apps go quiet: games are frozen, Jellyfin media is paused."""
+    if app in games_running:
+        games_running[app].send_signal(signal.SIGSTOP)
+    elif app == "jellyfin":
+        try:
+            js(tab(JELLYFIN), "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
+        except Exception:
+            pass
+
+
+def open_app(app):
+    global fg
+    with lock:
+        if app == fg:
+            return
+        if fg != "launcher":
+            suspend(fg)
+            bg.append(fg)
+        if app in games_running:
+            games_running[app].send_signal(signal.SIGCONT)
+            raise_window("--pid", str(games_running[app].pid))
+        elif app == "jellyfin":
+            show_tab(JELLYFIN, JELLYFIN)
+        elif app == "launcher":
+            show_tab(LAUNCHER, LAUNCHER)
+        elif app in os.listdir(ROMS):
+            p = games_running[app] = subprocess.Popen(["mgba", "-f", os.path.join(ROMS, app)])
+            threading.Thread(target=watch_game, args=(app, p), daemon=True).start()
+        else:
+            return
+        if app in bg:
+            bg.remove(app)
+        fg = app
+
+
+def close_app(app):
+    with lock:
+        if app in games_running:
+            p = games_running.pop(app)
+            p.send_signal(signal.SIGCONT)  # a frozen process can't handle SIGTERM
+            p.terminate()  # SDL quits cleanly on SIGTERM; mGBA flushes the battery save
+        elif app == "jellyfin":
+            t = tab(JELLYFIN)
+            if t:
+                cdp("/json/close/" + t["id"])
+        if app in bg:
+            bg.remove(app)
+        if fg == app:
+            open_app("launcher")
+
+
+def watch_game(app, p):
+    global fg
+    p.wait()
+    with lock:
+        if games_running.get(app) is p:
+            del games_running[app]
+        if app in bg:
+            bg.remove(app)
+        if fg == app:
+            fg = "launcher"  # it's gone; nothing to suspend
+            show_tab(LAUNCHER, LAUNCHER)
 
 
 def home():
-    if game:
-        game.terminate()  # SDL turns SIGTERM into a clean quit, battery save is flushed
-    else:
-        tap(e.KEY_ESC)
-        tap(e.KEY_LEFTALT, e.KEY_HOME)  # Chromium "go to home page" (policy points it at the launcher)
+    """Xbox button: background the current app and show the launcher; from the launcher, resume the last app."""
+    with lock:
+        if fg != "launcher":
+            open_app("launcher")
+        elif bg:
+            open_app(bg[-1])
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -80,7 +193,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/state":
-            return self.send_json({"games": games(), "jellyfin": JELLYFIN})
+            return self.send_json({"games": games(), "jellyfin": bool(JELLYFIN), "running": running()})
         if self.path.startswith("/cover/"):
             c = cover(os.path.basename(urllib.parse.unquote(self.path[7:])))
             if not c:
@@ -95,7 +208,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/launch":
-            launch(json.loads(self.rfile.read(int(self.headers["Content-Length"])))["file"])
+            app = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["app"]
+            threading.Thread(target=open_app, args=(app,), daemon=True).start()
+            return self.send_json({"ok": True})
+        if self.path == "/api/close":
+            close_app(json.loads(self.rfile.read(int(self.headers["Content-Length"])))["app"])
+            return self.send_json({"ok": True})
+        if self.path == "/api/home":  # same as the Xbox button
+            threading.Thread(target=home, daemon=True).start()
             return self.send_json({"ok": True})
         self.send_error(404)
 
@@ -104,8 +224,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 # --- controller -> mouse/keyboard -------------------------------------------------
-BUTTONS = {  # pad button -> (device, key...)
-    e.BTN_SOUTH: (mouse, e.BTN_LEFT),               # A: click
+BUTTONS = {  # pad button -> (device, key)
     e.BTN_NORTH: (kbd, e.KEY_SPACE),                # X: play/pause
     e.BTN_WEST: (mouse, e.BTN_RIGHT),               # Y: right click
     e.BTN_START: (kbd, e.KEY_ENTER),                # Menu: enter
@@ -118,8 +237,21 @@ VOLUME = {e.BTN_TL: "5%-", e.BTN_TR: "5%+"}  # LB/RB outside games; Xbox + D-pad
 SPEED, SCROLL, DEAD = 1400.0, 12.0, 0.15  # px/s, notches/s at full tilt, stick deadzone
 
 
+def tap(*keys):
+    for k in keys:
+        kbd.write(e.EV_KEY, k, 1)
+    for k in reversed(keys):
+        kbd.write(e.EV_KEY, k, 0)
+    kbd.syn()
+
+
 def volume(step):
-    subprocess.run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", step])
+    subprocess.run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", step], stderr=subprocess.DEVNULL)
+    out = subprocess.run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], capture_output=True, text=True).stdout
+    try:
+        osd.put(float(out.split()[1]))
+    except (IndexError, ValueError):
+        pass
 
 
 def find_pads():
@@ -134,6 +266,8 @@ def find_pads():
 def pad_loop():
     pads, grabbed, axes, hat, acc = [], None, {}, {}, [0.0] * 4
     guide_held = guide_combo = False
+    a_key = None  # what A is currently holding down: Enter after D-pad navigation, click after stick movement
+    nav = "mouse"
     last = time.monotonic()
     while True:
         if not pads:
@@ -141,7 +275,7 @@ def pad_loop():
             if not pads:
                 time.sleep(2)
                 continue
-        want = game is None  # grab in desktop mode so Chromium/Jellyfin don't see raw gamepad; release for mGBA
+        want = fg not in games_running  # grab outside games so Chromium/Jellyfin don't see the raw gamepad; release for mGBA
         if grabbed != want:
             for d in pads:
                 try:
@@ -159,12 +293,20 @@ def pad_loop():
                         else:
                             guide_held = False
                             if not guide_combo:
-                                home()  # tap = home; hold + D-pad = volume
+                                threading.Thread(target=home, daemon=True).start()  # tap = home; hold + D-pad = volume
                     elif guide_held and ev.type == e.EV_ABS and ev.code == e.ABS_HAT0Y and ev.value:
                         volume("5%+" if ev.value < 0 else "5%-")
                         guide_combo = True
                     elif not want:
                         continue
+                    elif ev.type == e.EV_KEY and ev.code == e.BTN_SOUTH and ev.value in (0, 1):
+                        if ev.value:
+                            a_key = (kbd, e.KEY_ENTER) if nav == "dpad" else (mouse, e.BTN_LEFT)
+                        if a_key:
+                            a_key[0].write(e.EV_KEY, a_key[1], ev.value)
+                            a_key[0].syn()
+                    elif ev.type == e.EV_KEY and ev.code == e.BTN_WEST and ev.value == 1 and fg == "launcher":
+                        tap(e.KEY_DELETE)  # Y in the launcher: close the selected app
                     elif ev.type == e.EV_KEY and ev.code in VOLUME and ev.value == 1:
                         volume(VOLUME[ev.code])
                     elif ev.type == e.EV_KEY and ev.code == e.BTN_EAST and ev.value == 1:
@@ -178,6 +320,7 @@ def pad_loop():
                             kbd.write(e.EV_KEY, HATS[ev.code, hat[ev.code]], 0)
                         if ev.value:
                             kbd.write(e.EV_KEY, HATS[ev.code, ev.value], 1)
+                            nav = "dpad"
                         kbd.syn()
                         hat[ev.code] = ev.value
                     elif ev.type == e.EV_ABS:
@@ -197,18 +340,57 @@ def pad_loop():
         vel = [axes.get(e.ABS_X, 0), axes.get(e.ABS_Y, 0), axes.get(rx, 0), axes.get(ry, 0)]
         for i, v in enumerate(vel):
             acc[i] += v * abs(v) * (SPEED if i < 2 else SCROLL) * dt  # quadratic curve: fine control near center
-        moves = [(e.REL_X, 0), (e.REL_Y, 1), (e.REL_HWHEEL, 2), (e.REL_WHEEL, 3)]
         sent = False
-        for code, i in moves:
+        for code, i in [(e.REL_X, 0), (e.REL_Y, 1), (e.REL_HWHEEL, 2), (e.REL_WHEEL, 3)]:
             n = int(acc[i])
             if n:
                 mouse.write(e.EV_REL, code, -n if code == e.REL_WHEEL else n)
                 acc[i] -= n
                 sent = True
+                if i < 2:
+                    nav = "mouse"
         if sent:
             mouse.syn()
 
 
+# --- volume overlay (Tk owns the main thread) ------------------------------------
+def overlay():
+    root = tk.Tk()
+    root.withdraw()
+    root.overrideredirect(True)
+    root.attributes("-topmost", True)
+    sw = root.winfo_screenwidth()
+    w, h = sw // 4, sw // 22
+    root.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, h // 2))
+    c = tk.Canvas(root, width=w, height=h, bg="#0d0f1a", highlightthickness=0)
+    c.pack()
+    font = ("DejaVu Sans", -(h // 3), "bold")
+    hide_at = [0.0]
+
+    def poll():
+        try:
+            level = osd.get_nowait()
+        except queue.Empty:
+            if hide_at[0] and time.monotonic() > hide_at[0]:
+                root.withdraw()
+                hide_at[0] = 0
+        else:
+            pad, bar = h // 4, h // 6
+            c.delete("all")
+            c.create_text(pad, h // 2, text="%d%%" % round(level * 100), fill="#eef0ff", font=font, anchor="w")
+            x0 = w // 3
+            c.create_rectangle(x0, (h - bar) // 2, w - pad, (h + bar) // 2, fill="#1a1e33", outline="")
+            c.create_rectangle(x0, (h - bar) // 2, x0 + (w - pad - x0) * min(level, 1), (h + bar) // 2, fill="#ffcc33", outline="")
+            root.deiconify()
+            root.lift()
+            hide_at[0] = time.monotonic() + 1.5
+        root.after(50, poll)
+
+    poll()
+    root.mainloop()
+
+
 if __name__ == "__main__":
     threading.Thread(target=pad_loop, daemon=True).start()
-    ThreadingHTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
+    threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", 8080), Handler).serve_forever, daemon=True).start()
+    overlay()

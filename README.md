@@ -7,7 +7,7 @@ A tiny family console on a Raspberry Pi 4/400. Plug it into the projector's USB 
 
 You can drive it two ways:
 
-- **An Xbox controller** over Bluetooth. The stick is a mouse, A clicks, B goes back and the Xbox button always brings you home (it quits the game if one is running).
+- **An Xbox controller** over Bluetooth. The stick is a mouse and the D-pad navigates. The Xbox button sends the current app to the background (paused) and brings you home; press it again to jump back in. Y closes a running app from the home screen.
 - **A browser**: `https://funstation.<your-tailnet>.ts.net` mirrors the screen, with full mouse and keyboard.
 
 A paired Bluetooth speaker connects automatically and takes over the audio.
@@ -27,15 +27,15 @@ See [AGENTS.md](AGENTS.md) for the full from-scratch procedure: flashing, Tailsc
 |---|---|
 | Left stick | mouse |
 | Right stick | scroll |
-| A | click |
+| A | select (D-pad highlight) or click (stick pointer) |
 | B | back |
 | X | play / pause (Space) |
-| Y | right click |
+| Y | close app (home screen) / right click |
 | Menu | Enter |
 | View | Esc |
 | D-pad | arrow keys |
 | LB / RB | volume down / up |
-| Xbox (tap) | home (quits game) |
+| Xbox (tap) | home, app keeps running paused; again to resume |
 | Xbox (hold) + D-pad up/down | volume, works in games too |
 
 In games, the controller goes directly to mGBA: A/B, LB/RB → L/R, View → Select, Menu → Start, and the D-pad or left stick for directions.

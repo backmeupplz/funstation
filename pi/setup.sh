@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
   xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager unclutter-xfixes \
-  chromium chromium-sandbox rpi-chromium-mods mgba-sdl python3-evdev fonts-noto-color-emoji \
+  chromium chromium-sandbox rpi-chromium-mods mgba-sdl python3-evdev python3-websocket python3-tk xdotool fonts-noto-color-emoji \
   x11vnc novnc python3-websockify \
   pipewire pipewire-pulse pipewire-alsa wireplumber libspa-0.2-bluetooth bluez
 command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
@@ -21,10 +21,11 @@ install -m755 funstation.py xinitrc bt-autoconnect.sh /opt/funstation/
 install -m644 ui/* /opt/funstation/ui/
 install -m644 funstation.env /etc/funstation.env
 
-# Chromium: Alt+Home (sent on Xbox button) returns to the launcher
+# Chromium: no translate/password prompts. Remote debugging needs a non-default profile dir, so keep the old
+# profile (and its Jellyfin login) by moving it there.
 install -d /etc/chromium/policies/managed
-echo '{"HomepageLocation":"http://localhost:8080","HomepageIsNewTabPage":false,"TranslateEnabled":false,"PasswordManagerEnabled":false}' \
-  > /etc/chromium/policies/managed/funstation.json
+echo '{"TranslateEnabled":false,"PasswordManagerEnabled":false}' > /etc/chromium/policies/managed/funstation.json
+[ -d "$H/.config/chromium" ] && [ ! -e "$H/.config/funstation-browser" ] && mv "$H/.config/chromium" "$H/.config/funstation-browser"
 
 # mGBA: fullscreen, correct 3:2 shape, no pause when focus changes
 install -d -o "$U" -g "$U" "$H/.config" "$H/.config/mgba"

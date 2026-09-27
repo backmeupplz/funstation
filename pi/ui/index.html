@@ -20,6 +20,9 @@
   .card:focus .art { border-color: var(--hot); box-shadow: 0 0 6vh #ffcc3355; }
   .name { margin-top: 2vh; font-size: 2.6vh; text-align: center; color: var(--dim); }
   .card:focus .name { color: var(--fg); }
+  .art { position: relative; }
+  .badge { position: absolute; bottom: 1.5vh; left: 50%; transform: translateX(-50%); background: var(--hot); color: var(--bg);
+           font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
   .jf .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
   footer { position: fixed; bottom: 4vh; left: 5vw; right: 5vw; color: var(--dim); font-size: 2.2vh; display: flex; gap: 3vw; }
   b { color: var(--fg); }
@@ -29,43 +32,55 @@
 <body>
 <header><h1>fun<span>station</span></h1><div id="clock"></div></header>
 <div id="row"></div>
-<footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>stick</b> mouse</span><span><b>Xbox</b> home</span></footer>
+<footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>Y</b> close app</span><span><b>stick</b> mouse</span><span><b>Xbox</b> home</span></footer>
 <div id="busy">Loading…</div>
 <script>
 const row = document.getElementById('row'), busy = document.getElementById('busy');
-const card = (cls, name, art, go) => {
+const card = (cls, name, art, app) => {
   const c = document.createElement('div');
-  c.className = 'card ' + cls; c.tabIndex = 0; c.go = go;
-  c.innerHTML = `<div class="art">${art}</div><div class="name"></div>`;
+  c.className = 'card ' + cls; c.tabIndex = 0; c.app = app; c.go = () => launch({ app });
+  c.innerHTML = `<div class="art"><span class="ph">${art}</span></div><div class="name"></div>`;
   c.querySelector('.name').textContent = name;
   c.onmouseenter = () => c.focus();
   row.append(c); return c;
 };
+const cards = () => [...row.querySelectorAll('.card')];
 const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
 
-fetch('/api/state').then(r => r.json()).then(s => {
-  if (s.jellyfin) card('jf', 'Jellyfin', '🎬', () => { show(); location = s.jellyfin; });
+const launch = body => { show(); fetch('/api/launch', { method: 'POST', body: JSON.stringify(body) }); };
+function render(s) {
+  const i = Math.max(cards().indexOf(document.activeElement), 0);
+  row.replaceChildren();
+  if (s.jellyfin) card('jf', 'Jellyfin', '🎬', 'jellyfin');
   for (const g of s.games) {
-    const c = card('game', g.name, '🎮', () => { show(); fetch('/api/launch', { method: 'POST', body: JSON.stringify({ file: g.file }) }); });
+    const c = card('game', g.name, '🎮', g.file);
     const img = new Image(), url = '/cover/' + encodeURIComponent(g.file);
-    img.onload = () => { const a = c.querySelector('.art'); a.style.backgroundImage = `url("${url}")`; a.textContent = ''; };
+    img.onload = () => { const a = c.querySelector('.art'); a.style.backgroundImage = `url("${url}")`; a.querySelector('.ph')?.remove(); };
     img.src = url;
   }
-  (row.querySelector('.card') || document.body).focus();
-});
+  for (const c of cards()) if ((c.running = s.running.includes(c.app))) c.querySelector('.art').insertAdjacentHTML('beforeend', '<span class="badge">▶ running</span>');
+  (cards()[Math.min(i, cards().length - 1)] || document.body).focus();
+}
+const refresh = () => fetch('/api/state').then(r => r.json()).then(render);
+refresh();
+// Coming back from an app (Xbox button): drop the loading screen, update "running" badges.
+// Jellyfin is another tab (visibilitychange); a game is another window covering this one (focus).
+const back = () => { busy.style.display = 'none'; refresh(); };
+document.addEventListener('visibilitychange', () => document.hidden || back());
+addEventListener('focus', back);
 
-const cards = () => [...row.querySelectorAll('.card')];
 addEventListener('keydown', ev => {
   const all = cards(), i = all.indexOf(document.activeElement);
   if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') all[Math.min(i + 1, all.length - 1)]?.focus();
   else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') all[Math.max(i - 1, 0)]?.focus();
   else if (ev.key === 'Enter' || ev.key === ' ') document.activeElement.go?.();
+  else if (ev.key === 'Delete' && document.activeElement.running)  // Y on the controller
+    fetch('/api/close', { method: 'POST', body: JSON.stringify({ app: document.activeElement.app }) }).then(refresh);
   else return;
   ev.preventDefault();
 });
 // A (left click) anywhere opens the focused card, so D-pad + A works without aiming the mouse.
 addEventListener('click', ev => (ev.target.closest('.card') || document.activeElement).go?.());
-addEventListener('pageshow', () => busy.style.display = 'none');
 setInterval(() => document.getElementById('clock').textContent =
   new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 1000);
 </script>

@@ -5,19 +5,28 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
 ## Architecture
 
 - **OS**: Raspberry Pi OS Lite (Trixie, arm64). There's no desktop. tty1 autologin runs `startx /opt/funstation/xinitrc`.
-- **`pi/xinitrc`** starts `matchbox-window-manager` (fullscreen, one window at a time), `x11vnc` (localhost only) and `funstation.py`. It then runs Chromium in kiosk mode on `http://localhost:8080` and restarts it if it dies.
-- **`pi/funstation.py`** is one process with two jobs:
-  - An HTTP server on `127.0.0.1:8080`:
+- **`pi/xinitrc`** starts `matchbox-window-manager` (fullscreen, one window at a time), `x11vnc` (localhost only) and `funstation.py` (restarted if it dies). It then runs Chromium in kiosk mode on `http://localhost:8080`, with `--remote-debugging-port=9222` (localhost) and its own profile dir `~/.config/funstation-browser` (Chromium refuses remote debugging on the default profile). It also restarts Chromium if it dies.
+- **`pi/funstation.py`** is one process:
+  - **HTTP server** on `127.0.0.1:8080`:
     - serves `pi/ui/index.html`
-    - `GET /api/state` returns the games and the Jellyfin URL
-    - `GET /cover/<rom>` returns the box art. It uses `<rom>.png`/`.jpg` next to the ROM if present, otherwise it downloads libretro thumbnails and caches them in `~/.cache/funstation`.
-    - `POST /api/launch` starts `mgba -f <rom>`.
-  - A controller loop (python-evdev):
-    - In desktop mode it grabs the pad and turns it into a virtual mouse and keyboard through uinput. Left stick moves the mouse, right stick scrolls, A is left click, B is back (Alt+Left), X is Space, Y is right click, Menu is Enter, View is Esc and the D-pad sends arrow keys.
-    - While mGBA runs it releases the grab so mGBA reads the pad directly.
-    - Volume: LB/RB outside games, or hold Xbox + D-pad up/down anywhere (`wpctl set-volume @DEFAULT_AUDIO_SINK@`). The Xbox button acts on release so the combo doesn't also trigger home.
-    - The Xbox button quits mGBA (SIGTERM, which is a clean quit, so battery saves are flushed). Outside a game it sends Esc and Alt+Home. A Chromium policy sets the home page to the launcher, so Alt+Home returns there.
-- **Jellyfin** is simply Chromium navigating to `JELLYFIN_URL`.
+    - `GET /api/state` returns games, whether Jellyfin is set, and the running apps
+    - `GET /cover/<rom>` returns box art: `<rom>.png`/`.jpg` next to the ROM if present, otherwise libretro thumbnails, cached in `~/.cache/funstation`
+    - `POST /api/launch {"app": "jellyfin" | "<rom file>"}` opens or resumes an app
+    - `POST /api/close {"app": ...}` closes an app
+    - `POST /api/home` does the same as the Xbox button
+  - **Apps**: an app is `launcher`, `jellyfin`, or a ROM file name. Several can run at once.
+    - Jellyfin runs in its own Chromium tab. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
+    - Each game is its own `mgba -f` process.
+    - Backgrounding an app freezes a game (SIGSTOP) or pauses Jellyfin's `<video>`/`<audio>`, so it goes silent.
+    - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
+  - **Xbox button**: a tap backgrounds the current app and shows the launcher. From the launcher, it resumes the most recent app. It acts on release, so hold + D-pad up/down can be the volume combo.
+  - **Controller loop** (python-evdev):
+    - Outside games it grabs the pad and drives a uinput mouse and keyboard. Left stick moves the mouse and the right stick scrolls.
+    - A sends Enter if the D-pad was used last, or a click if the stick was.
+    - B is back (Alt+Left). X is Space. Y is right click, or Delete in the launcher, which closes the selected running app. Menu is Enter, View is Esc, and the D-pad sends arrow keys.
+    - LB/RB change the volume.
+    - While a game is in front it releases the grab, so mGBA reads the pad directly. mGBA bindings are in the `config.ini` written by `setup.sh`.
+  - **Volume overlay**: Tk owns the main thread and shows an always-on-top override-redirect bar for 1.5 s after each change (`wpctl`).
 - **Web mirror**:
   - `funstation-web.service` runs websockify and noVNC on `127.0.0.1:6080`.
   - `tailscale serve --bg --https=443 http://127.0.0.1:6080` publishes it at `https://<host>.<tailnet>.ts.net/`.
@@ -49,7 +58,8 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
 
 ## Debugging on the Pi
 
-- Launcher/pad logs: the X session has no journal, so run `DISPLAY=:0 python3 /opt/funstation/funstation.py` by hand after `pkill -f funstation.py`.
-- Screen: open the web mirror, or run `DISPLAY=:0 import -window root /tmp/s.png` if imagemagick is installed.
+- Launcher/pad logs: the X session has no journal. `pkill -f '^python3 /opt/funstation/funstation.py'` and xinitrc restarts it; to see output, run it by hand with `DISPLAY=:0` and `/etc/funstation.env` loaded.
+- Drive it without a controller: `curl -XPOST localhost:8080/api/launch -d '{"app":"jellyfin"}'`, `curl -XPOST localhost:8080/api/home`, `DISPLAY=:0 xdotool key Right`.
+- Screen: open the web mirror, or `DISPLAY=:0 scrot -o /tmp/s.png` (`apt install scrot`).
 - Boot time: `systemd-analyze` and `systemd-analyze blame`.
 - Audio: `wpctl status` (run as the `fun` user).
