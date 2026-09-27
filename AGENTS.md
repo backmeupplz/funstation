@@ -9,7 +9,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
 - **`pi/funstation.py`** is one process:
   - **HTTP server** on `127.0.0.1:8080`:
     - serves `pi/ui/index.html`
-    - `GET /api/state` returns games, whether Jellyfin is set, and the running apps
+    - `GET /api/state` returns games, the configured web apps, and the running apps
     - `GET /cover/<rom>` returns box art: `<rom>.png`/`.jpg` next to the ROM if present, otherwise libretro thumbnails, cached in `~/.cache/funstation`
     - `POST /api/launch {"app": "jellyfin" | "navidrome" | "<rom file>"}` opens or resumes an app
     - `POST /api/close {"app": ...}` closes an app
@@ -17,7 +17,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
   - **Apps**: an app is `launcher`, a web app id, or a ROM file name. Several can run at once.
     - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html`. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
     - Each game is its own `mgba -f` process.
-    - Backgrounding an app freezes a game (SIGSTOP) or pauses Jellyfin's `<video>`/`<audio>`, so it goes silent.
+    - Backgrounding an app freezes a game (SIGSTOP) or pauses the web app's `<video>`/`<audio>`, so it goes silent.
     - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
   - **Xbox button**: a tap backgrounds the current app and shows the launcher. From the launcher, it resumes the most recent app. It acts on release, so hold + D-pad up/down can be the volume combo.
   - **Controller loop** (python-evdev):
