@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
   xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager unclutter-xfixes \
-  chromium mgba-sdl python3-evdev fonts-noto-color-emoji \
+  chromium chromium-sandbox rpi-chromium-mods mgba-sdl python3-evdev fonts-noto-color-emoji \
   x11vnc novnc python3-websockify \
   pipewire pipewire-pulse pipewire-alsa wireplumber libspa-0.2-bluetooth bluez
 command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
@@ -26,9 +26,9 @@ install -d /etc/chromium/policies/managed
 echo '{"HomepageLocation":"http://localhost:8080","HomepageIsNewTabPage":false,"TranslateEnabled":false}' \
   > /etc/chromium/policies/managed/funstation.json
 
-# mGBA: fullscreen, no pause when focus changes
-install -d -o "$U" -g "$U" "$H/.config/mgba"
-[ -f "$H/.config/mgba/config.ini" ] || printf '[ports.sdl]\nfullscreen=1\npauseOnFocusLost=0\n' \
+# mGBA: fullscreen, correct 3:2 shape, no pause when focus changes
+install -d -o "$U" -g "$U" "$H/.config" "$H/.config/mgba"
+printf '[ports.sdl]\nfullscreen=1\nlockAspectRatio=1\npauseOnFocusLost=0\n' \
   | install -m644 -o "$U" -g "$U" /dev/stdin "$H/.config/mgba/config.ini"
 install -d -o "$U" -g "$U" "$H/roms"
 
@@ -69,15 +69,18 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-sed -i 's/^#\?FastConnectable.*/FastConnectable = true/' /etc/bluetooth/main.conf
+# Xbox pads fail BLE pairing with "Authentication Failed" unless just-works re-pairing is allowed
+sed -i 's/^#\?FastConnectable.*/FastConnectable = true/; s/^#\?JustWorksRepairing.*/JustWorksRepairing = always/; s/^#\?AutoEnable.*/AutoEnable = true/' /etc/bluetooth/main.conf
+rfkill unblock bluetooth
 systemctl daemon-reload
 systemctl enable --now funstation-web funstation-bt
 
 # fast boot: quiet kernel, no first-boot/cloud/update machinery
 touch /etc/cloud/cloud-init.disabled
-sed -i 's/ console=serial0,115200//; s/ quiet loglevel=3 logo.nologo//; s/$/ quiet loglevel=3 logo.nologo/' /boot/firmware/cmdline.txt
-systemctl disable --now NetworkManager-wait-online ModemManager e2scrub_reap \
-  apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer 2>/dev/null || true
+sed -i 's/console=serial0,115200 //; s/ quiet loglevel=3 logo.nologo//; s/$/ quiet loglevel=3 logo.nologo/' /boot/firmware/cmdline.txt
+for u in NetworkManager-wait-online ModemManager e2scrub_reap apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer; do
+  systemctl disable --now "$u" 2>/dev/null || true
+done
 
 if tailscale status >/dev/null 2>&1; then
   tailscale serve --bg --https=443 http://127.0.0.1:6080 >/dev/null

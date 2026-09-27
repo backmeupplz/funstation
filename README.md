@@ -1,6 +1,6 @@
 # funstation
 
-A tiny family console on a Raspberry Pi Zero 2 W. Plug it into the projector's USB (power) and HDMI, and it boots straight into a couch launcher:
+A tiny family console on a Raspberry Pi 4/400. Plug it into the projector's USB (power) and HDMI, and it boots straight into a couch launcher:
 
 - **Jellyfin** (web client in a kiosk browser)
 - **GBA / GB / GBC games** through mGBA, with box art and no emulator UI

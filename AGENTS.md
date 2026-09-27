@@ -1,6 +1,6 @@
 # funstation — instructions for AI agents
 
-A Raspberry Pi Zero 2 W plugged into a TV/projector over HDMI. It boots into a couch launcher with Jellyfin and mGBA games. You control it with an Xbox controller over Bluetooth, or from a browser anywhere on the tailnet.
+A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector over HDMI. It boots into a couch launcher with Jellyfin and mGBA games. You control it with an Xbox controller over Bluetooth, or from a browser anywhere on the tailnet.
 
 ## Architecture
 
@@ -25,9 +25,10 @@ A Raspberry Pi Zero 2 W plugged into a TV/projector over HDMI. It boots into a c
 
 ## Replicating from scratch
 
-1. **Flash** the latest `raspios_lite_arm64` image.
+1. **Flash** the latest `raspios_lite_arm64` image. The original Pi Zero W (ARMv6) is too slow for this, and no current Chromium runs on it.
    - Before first boot, edit the boot partition. It uses cloud-init.
    - `user-data`: hostname, user `fun` with an SSH public key, `sudo: ALL=(ALL) NOPASSWD:ALL`, `lock_passwd: true` and `runcmd: [[systemctl, enable, --now, ssh]]`. Also create an empty `ssh` file.
+   - `meta-data`: set a new `instance-id` (hyphen; the template's `instance_id` is ignored). The image ships with the default ID already marked as done, so cloud-init skips the users/SSH-key/sudo modules unless the ID changes.
    - `network-config`: netplan v2 with `wifis.wlan0.access-points` and `regulatory-domain` (Wi-Fi stays rfkill-blocked without it).
    - `config.txt`: `disable_splash=1`, `boot_delay=0`, `camera_auto_detect=0`.
    - Writing the raw device usually needs the user's sudo (`dd ... conv=fsync`), so ask them to run it.
@@ -38,11 +39,11 @@ A Raspberry Pi Zero 2 W plugged into a TV/projector over HDMI. It boots into a c
    - On the Pi, run `sudo tailscale up --hostname=funstation`, give the user the login URL, then re-run `./install.sh` so `tailscale serve` gets configured.
    - After that, set `FUN_HOST` to the MagicDNS name.
    - Plain OpenSSH works over the tailnet. Don't use `--ssh`: Tailscale SSH check mode would keep asking for browser re-auth.
-6. **Pair Bluetooth** (the user has to press the pair buttons):
+6. **Pair Bluetooth** (the user has to press the pair buttons). Pair from a single `bluetoothctl` session so its default agent handles the pairing; one-shot `bluetoothctl pair` has no agent and fails with Authentication Failed:
    ```
-   sudo bluetoothctl --timeout 30 scan on          # while the device is in pairing mode
-   sudo bluetoothctl pair <MAC> && sudo bluetoothctl trust <MAC> && sudo bluetoothctl connect <MAC>
+   { echo "scan on"; sleep 10; echo "pair <MAC>"; sleep 12; echo "trust <MAC>"; echo "connect <MAC>"; sleep 8; echo quit; } | sudo bluetoothctl
    ```
+   Xbox controllers are BLE and show up in a normal scan. Classic speakers (e.g. JBL Charge 4) may only appear with `menu scan` → `transport bredr` → `back` before `scan on`.
    Check the controller with `python3 -m evdev.evtest`. The name must contain "Xbox" or "Controller" for `funstation.py` to pick it up.
 
 ## Debugging on the Pi
