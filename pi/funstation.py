@@ -114,7 +114,12 @@ BUTTONS = {  # pad button -> (device, key...)
 HATS = {(e.ABS_HAT0X, -1): e.KEY_LEFT, (e.ABS_HAT0X, 1): e.KEY_RIGHT,
         (e.ABS_HAT0Y, -1): e.KEY_UP, (e.ABS_HAT0Y, 1): e.KEY_DOWN}
 GUIDE = (e.BTN_MODE, e.KEY_HOMEPAGE)
+VOLUME = {e.BTN_TL: "5%-", e.BTN_TR: "5%+"}  # LB/RB outside games; Xbox + D-pad up/down everywhere
 SPEED, SCROLL, DEAD = 1400.0, 12.0, 0.15  # px/s, notches/s at full tilt, stick deadzone
+
+
+def volume(step):
+    subprocess.run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", step])
 
 
 def find_pads():
@@ -128,6 +133,7 @@ def find_pads():
 
 def pad_loop():
     pads, grabbed, axes, hat, acc = [], None, {}, {}, [0.0] * 4
+    guide_held = guide_combo = False
     last = time.monotonic()
     while True:
         if not pads:
@@ -147,10 +153,20 @@ def pad_loop():
         try:
             for d in r:
                 for ev in d.read():
-                    if ev.type == e.EV_KEY and ev.code in GUIDE and ev.value == 1:
-                        home()
+                    if ev.type == e.EV_KEY and ev.code in GUIDE and ev.value in (0, 1):
+                        if ev.value:
+                            guide_held, guide_combo = True, False
+                        else:
+                            guide_held = False
+                            if not guide_combo:
+                                home()  # tap = home; hold + D-pad = volume
+                    elif guide_held and ev.type == e.EV_ABS and ev.code == e.ABS_HAT0Y and ev.value:
+                        volume("5%+" if ev.value < 0 else "5%-")
+                        guide_combo = True
                     elif not want:
                         continue
+                    elif ev.type == e.EV_KEY and ev.code in VOLUME and ev.value == 1:
+                        volume(VOLUME[ev.code])
                     elif ev.type == e.EV_KEY and ev.code == e.BTN_EAST and ev.value == 1:
                         tap(e.KEY_LEFTALT, e.KEY_LEFT)  # B: back
                     elif ev.type == e.EV_KEY and ev.code in BUTTONS and ev.value in (0, 1):

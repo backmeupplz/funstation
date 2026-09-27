@@ -114,4 +114,5 @@ done
 if tailscale status >/dev/null 2>&1; then
   tailscale serve --bg --https=443 http://127.0.0.1:6080 >/dev/null
 fi
+pkill -f "^python3 /opt/funstation/funstation.py" || true  # xinitrc respawns it with the new code
 echo "setup done"

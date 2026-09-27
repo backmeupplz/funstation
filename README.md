@@ -34,6 +34,8 @@ See [AGENTS.md](AGENTS.md) for the full from-scratch procedure: flashing, Tailsc
 | Menu | Enter |
 | View | Esc |
 | D-pad | arrow keys |
-| Xbox | home (quits game) |
+| LB / RB | volume down / up |
+| Xbox (tap) | home (quits game) |
+| Xbox (hold) + D-pad up/down | volume, works in games too |
 
-In games, the controller goes directly to mGBA.
+In games, the controller goes directly to mGBA: A/B, LB/RB → L/R, View → Select, Menu → Start, and the D-pad or left stick for directions.

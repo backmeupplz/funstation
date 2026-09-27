@@ -15,6 +15,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
   - A controller loop (python-evdev):
     - In desktop mode it grabs the pad and turns it into a virtual mouse and keyboard through uinput. Left stick moves the mouse, right stick scrolls, A is left click, B is back (Alt+Left), X is Space, Y is right click, Menu is Enter, View is Esc and the D-pad sends arrow keys.
     - While mGBA runs it releases the grab so mGBA reads the pad directly.
+    - Volume: LB/RB outside games, or hold Xbox + D-pad up/down anywhere (`wpctl set-volume @DEFAULT_AUDIO_SINK@`). The Xbox button acts on release so the combo doesn't also trigger home.
     - The Xbox button quits mGBA (SIGTERM, which is a clean quit, so battery saves are flushed). Outside a game it sends Esc and Alt+Home. A Chromium policy sets the home page to the launcher, so Alt+Home returns there.
 - **Jellyfin** is simply Chromium navigating to `JELLYFIN_URL`.
 - **Web mirror**:
