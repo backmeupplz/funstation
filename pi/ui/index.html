@@ -23,7 +23,8 @@
   .art { position: relative; }
   .badge { position: absolute; bottom: 1.5vh; left: 50%; transform: translateX(-50%); background: var(--hot); color: var(--bg);
            font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
-  .jf .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
+  .navidrome .art { background: linear-gradient(135deg, #0084ff, #00c896); }
+  .jellyfin .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
   footer { position: fixed; bottom: 4vh; left: 5vw; right: 5vw; color: var(--dim); font-size: 2.2vh; display: flex; gap: 3vw; }
   b { color: var(--fg); }
   #busy { position: fixed; inset: 0; background: var(--bg); display: none; place-items: center; font-size: 4vh; }
@@ -44,6 +45,7 @@ const card = (cls, name, art, app) => {
   c.onmouseenter = () => c.focus();
   row.append(c); return c;
 };
+const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', '🎵'] };
 const cards = () => [...row.querySelectorAll('.card')];
 const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
 
@@ -51,7 +53,7 @@ const launch = body => { show(); fetch('/api/launch', { method: 'POST', body: JS
 function render(s) {
   const i = Math.max(cards().indexOf(document.activeElement), 0);
   row.replaceChildren();
-  if (s.jellyfin) card('jf', 'Jellyfin', '🎬', 'jellyfin');
+  for (const a of s.apps) card(a, ...WEBAPPS[a], a);
   for (const g of s.games) {
     const c = card('game', g.name, '🎮', g.file);
     const img = new Image(), url = '/cover/' + encodeURIComponent(g.file);

@@ -3,9 +3,16 @@
 set -a; . /etc/funstation.env; set +a
 xset s off -dpms s noblank
 matchbox-window-manager -use_titlebar no &
+# projector switched on / input changed after boot: nothing else reacts to HDMI hotplug here, so re-detect
+# (with nothing plugged in, keep a 1080p virtual screen so the web mirror stays usable)
+( last=; while sleep 2; do
+    s=$(cat /sys/class/drm/card*-HDMI-A-*/status)
+    [ "$s" != "$last" ] && { echo "$s" | grep -qx connected && xrandr --auto || xrandr --fb 1920x1080; }
+    last=$s
+  done ) &
 unclutter-xfixes --timeout 3 &
 x11vnc -display :0 -localhost -forever -shared -nopw -quiet -noxdamage &
-while true; do python3 /opt/funstation/funstation.py; sleep 1; done &
+while true; do (set -a; . /etc/funstation.env; exec python3 /opt/funstation/funstation.py); sleep 1; done &  # re-reads config on restart
 while true; do
   chromium --kiosk --user-data-dir="$HOME/.config/funstation-browser" --remote-debugging-port=9222 --noerrdialogs --disable-infobars --no-first-run --password-store=basic \
     --autoplay-policy=no-user-gesture-required --disable-features=Translate,MediaRouter \

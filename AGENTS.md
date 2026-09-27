@@ -1,6 +1,6 @@
 # funstation — instructions for AI agents
 
-A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector over HDMI. It boots into a couch launcher with Jellyfin and mGBA games. You control it with an Xbox controller over Bluetooth, or from a browser anywhere on the tailnet.
+A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector over HDMI. It boots into a couch launcher with Jellyfin, Navidrome (music) and mGBA games. You control it with an Xbox controller over Bluetooth, or from a browser anywhere on the tailnet.
 
 ## Architecture
 
@@ -11,11 +11,11 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - serves `pi/ui/index.html`
     - `GET /api/state` returns games, whether Jellyfin is set, and the running apps
     - `GET /cover/<rom>` returns box art: `<rom>.png`/`.jpg` next to the ROM if present, otherwise libretro thumbnails, cached in `~/.cache/funstation`
-    - `POST /api/launch {"app": "jellyfin" | "<rom file>"}` opens or resumes an app
+    - `POST /api/launch {"app": "jellyfin" | "navidrome" | "<rom file>"}` opens or resumes an app
     - `POST /api/close {"app": ...}` closes an app
     - `POST /api/home` does the same as the Xbox button
-  - **Apps**: an app is `launcher`, `jellyfin`, or a ROM file name. Several can run at once.
-    - Jellyfin runs in its own Chromium tab. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
+  - **Apps**: an app is `launcher`, a web app id, or a ROM file name. Several can run at once.
+    - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html`. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
     - Each game is its own `mgba -f` process.
     - Backgrounding an app freezes a game (SIGSTOP) or pauses Jellyfin's `<video>`/`<audio>`, so it goes silent.
     - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
@@ -27,6 +27,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - LB/RB change the volume.
     - While a game is in front it releases the grab, so mGBA reads the pad directly. mGBA bindings are in the `config.ini` written by `setup.sh`.
   - **Volume overlay**: Tk owns the main thread and shows an always-on-top override-redirect bar for 1.5 s after each change (`wpctl`).
+- **Display hotplug**: `xinitrc` polls `/sys/class/drm/*HDMI*/status` and runs `xrandr --auto` when a display connects. With nothing connected, it sets a 1920×1080 virtual screen so the web mirror stays usable.
 - **Web mirror**:
   - `funstation-web.service` runs websockify and noVNC on `127.0.0.1:6080`.
   - `tailscale serve --bg --https=443 http://127.0.0.1:6080` publishes it at `https://<host>.<tailnet>.ts.net/`.

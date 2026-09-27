@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Funstation: launcher backend, app switching (with backgrounding), Xbox pad -> mouse/keyboard, volume OSD."""
-import json, os, queue, select, signal, subprocess, threading, time, urllib.parse, urllib.request
+import json, logging, os, queue, select, signal, subprocess, threading, time, urllib.parse, urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import tkinter as tk
 
@@ -10,15 +10,18 @@ from evdev import UInput, ecodes as e
 
 ROMS = os.path.expanduser(os.environ.get("ROMS_DIR", "~/roms"))
 JELLYFIN = os.environ.get("JELLYFIN_URL", "")
+# web apps, each in its own Chromium tab: id -> URL (unset ones are hidden)
+WEBAPPS = {k: v for k, v in (("jellyfin", JELLYFIN), ("navidrome", os.environ.get("NAVIDROME_URL", ""))) if v}
 LAUNCHER = "http://localhost:8080/"
 CDP = "http://127.0.0.1:9222"  # Chromium remote debugging, localhost only
 COVERS = os.path.expanduser("~/.cache/funstation/covers")
 SYSTEMS = {".gba": "Nintendo - Game Boy Advance", ".gbc": "Nintendo - Game Boy Color", ".gb": "Nintendo - Game Boy"}
 
-fg = "launcher"      # what's on screen: launcher | jellyfin | <rom file>
+fg = "launcher"      # what's on screen: launcher | <web app id> | <rom file>
 bg = []              # backgrounded apps, most recent last
 games_running = {}   # rom file -> mgba Popen
 lock = threading.RLock()
+log = logging.getLogger("funstation")
 osd = queue.Queue()  # volume levels for the on-screen overlay
 
 kbd = UInput({e.EV_KEY: list(range(1, 249))}, name="funstation-kbd")
@@ -52,7 +55,7 @@ def cover(rom):
     return cached
 
 
-# --- Chromium tabs (launcher and Jellyfin live in separate tabs) -------------------
+# --- Chromium tabs (the launcher and each web app live in separate tabs) ----------
 def cdp(path, method="GET"):
     with urllib.request.urlopen(urllib.request.Request(CDP + path, method=method), timeout=5) as r:
         return r.read()  # JSON for /json/list, plain text for /json/activate
@@ -76,9 +79,9 @@ def raise_window(*search):
         subprocess.run(["xdotool", "windowactivate", ids[-1]], stderr=subprocess.DEVNULL)
 
 
-def show_tab(prefix, url):
+def show_tab(url):
     raise_window("--name", " - Chromium$")  # the browser window (Chromium also has unnamed helper windows)
-    t = tab(prefix)
+    t = tab(url)
     if t:
         return cdp("/json/activate/" + t["id"])
     cdp("/json/new?" + url, "PUT")
@@ -97,41 +100,40 @@ def jellyfin_tv_layout():
             pass
 
 
-# --- apps: "launcher", "jellyfin", or a ROM file name ------------------------------------
+# --- apps: "launcher", a web app id, or a ROM file name --------------------------------
 def running():
     try:
-        jf = ["jellyfin"] if JELLYFIN and tab(JELLYFIN) else []
+        urls = [t["url"] for t in json.loads(cdp("/json/list")) if t["type"] == "page"]
     except OSError:
-        jf = []
-    return jf + list(games_running)
+        urls = []
+    return [a for a, u in WEBAPPS.items() if any(x.startswith(u) for x in urls)] + list(games_running)
 
 
 def suspend(app):
-    """Backgrounded apps go quiet: games are frozen, Jellyfin media is paused."""
+    """Backgrounded apps go quiet: games are frozen, web app media is paused."""
     if app in games_running:
         games_running[app].send_signal(signal.SIGSTOP)
-    elif app == "jellyfin":
+    elif app in WEBAPPS:
         try:
-            js(tab(JELLYFIN), "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
+            js(tab(WEBAPPS[app]), "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
         except Exception:
             pass
 
 
-def open_app(app):
+def open_app(app, why=""):
     global fg
+    log.info("open %s (fg=%s bg=%s) %s", app, fg, bg, why)
     with lock:
-        if app == fg:
-            return
-        if fg != "launcher":
+        if fg not in ("launcher", app):  # re-opening the current app just re-shows it (e.g. after a Chromium restart)
             suspend(fg)
             bg.append(fg)
         if app in games_running:
             games_running[app].send_signal(signal.SIGCONT)
             raise_window("--pid", str(games_running[app].pid))
-        elif app == "jellyfin":
-            show_tab(JELLYFIN, JELLYFIN)
+        elif app in WEBAPPS:
+            show_tab(WEBAPPS[app])
         elif app == "launcher":
-            show_tab(LAUNCHER, LAUNCHER)
+            show_tab(LAUNCHER)
         elif app in os.listdir(ROMS):
             p = games_running[app] = subprocess.Popen(["mgba", "-f", os.path.join(ROMS, app)])
             threading.Thread(target=watch_game, args=(app, p), daemon=True).start()
@@ -148,8 +150,8 @@ def close_app(app):
             p = games_running.pop(app)
             p.send_signal(signal.SIGCONT)  # a frozen process can't handle SIGTERM
             p.terminate()  # SDL quits cleanly on SIGTERM; mGBA flushes the battery save
-        elif app == "jellyfin":
-            t = tab(JELLYFIN)
+        elif app in WEBAPPS:
+            t = tab(WEBAPPS[app])
             if t:
                 cdp("/json/close/" + t["id"])
         if app in bg:
@@ -168,16 +170,16 @@ def watch_game(app, p):
             bg.remove(app)
         if fg == app:
             fg = "launcher"  # it's gone; nothing to suspend
-            show_tab(LAUNCHER, LAUNCHER)
+            show_tab(LAUNCHER)
 
 
 def home():
     """Xbox button: background the current app and show the launcher; from the launcher, resume the last app."""
     with lock:
         if fg != "launcher":
-            open_app("launcher")
+            open_app("launcher", "xbox")
         elif bg:
-            open_app(bg[-1])
+            open_app(bg[-1], "xbox resume")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -193,7 +195,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/state":
-            return self.send_json({"games": games(), "jellyfin": bool(JELLYFIN), "running": running()})
+            return self.send_json({"games": games(), "apps": list(WEBAPPS), "running": running()})
         if self.path.startswith("/cover/"):
             c = cover(os.path.basename(urllib.parse.unquote(self.path[7:])))
             if not c:
@@ -209,7 +211,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/launch":
             app = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["app"]
-            threading.Thread(target=open_app, args=(app,), daemon=True).start()
+            threading.Thread(target=open_app, args=(app, "from launcher page"), daemon=True).start()
             return self.send_json({"ok": True})
         if self.path == "/api/close":
             close_app(json.loads(self.rfile.read(int(self.headers["Content-Length"])))["app"])
@@ -277,6 +279,12 @@ def pad_loop():
                 continue
         want = fg not in games_running  # grab outside games so Chromium/Jellyfin don't see the raw gamepad; release for mGBA
         if grabbed != want:
+            if not want:  # handing the pad to a game: release anything we're holding, or it sticks (and auto-repeats)
+                for dev in (kbd, mouse):
+                    for key in dev.capabilities()[e.EV_KEY]:
+                        dev.write(e.EV_KEY, key, 0)
+                    dev.syn()
+                hat, a_key = {}, None
             for d in pads:
                 try:
                     d.grab() if want else d.ungrab()
@@ -288,6 +296,7 @@ def pad_loop():
             for d in r:
                 for ev in d.read():
                     if ev.type == e.EV_KEY and ev.code in GUIDE and ev.value in (0, 1):
+                        log.info("xbox %s from %s", "down" if ev.value else "up", d.path)
                         if ev.value:
                             guide_held, guide_combo = True, False
                         else:
@@ -391,6 +400,8 @@ def overlay():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(filename=os.path.expanduser("~/.cache/funstation/log"), level=logging.INFO,
+                        format="%(asctime)s %(threadName)s %(message)s")
     threading.Thread(target=pad_loop, daemon=True).start()
     threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", 8080), Handler).serve_forever, daemon=True).start()
     overlay()

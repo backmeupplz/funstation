@@ -3,6 +3,7 @@
 A tiny family console on a Raspberry Pi 4/400. Plug it into the projector's USB (power) and HDMI, and it boots straight into a couch launcher:
 
 - **Jellyfin** (web client in a kiosk browser)
+- **Music** from Navidrome (its web player)
 - **GBA / GB / GBC games** through mGBA, with box art and no emulator UI
 
 You can drive it two ways:
