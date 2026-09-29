@@ -27,11 +27,13 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - LB/RB change the volume.
     - While a game is in front it releases the grab, so mGBA reads the pad directly. mGBA bindings are in the `config.ini` written by `setup.sh`.
   - **Volume overlay**: Tk owns the main thread and shows an always-on-top override-redirect bar for 1.5 s after each change (`wpctl`).
+- **HDMI**: `setup.sh` adds `video=HDMI-A-1:1920x1080@60D` to the kernel cmdline so HDMI 0 is driven even when the display's hot-plug signal is missing or late. Projectors that power the Pi often don't assert it in time, and then the port stays "disconnected" and the screen gets no signal.
 - **Display hotplug**: `xinitrc` polls `/sys/class/drm/*HDMI*/status` and runs `xrandr --auto` when a display connects. With nothing connected, it sets a 1920×1080 virtual screen so the web mirror stays usable.
 - **Web mirror**:
   - `funstation-web.service` runs websockify and noVNC on `127.0.0.1:6080`.
   - `tailscale serve --bg --https=443 http://127.0.0.1:6080` publishes it at `https://<host>.<tailnet>.ts.net/`.
   - `/usr/share/novnc/index.html` redirects to `vnc.html?autoconnect=1&resize=scale`.
+- **Wi-Fi**: use a **5 GHz** network. On the Pi, Wi-Fi and Bluetooth share one radio chip, and on 2.4 GHz they also share the airwaves. Streaming to a Bluetooth speaker then causes Wi-Fi jitter (seen: 1–64 ms to the router), giving choppy video and stuttering audio. Add 5 GHz as a higher-`autoconnect-priority` NetworkManager connection and keep 2.4 GHz as a fallback.
 - **Audio**: PipeWire with the bluez plugin. A Bluetooth speaker becomes the default output once it connects. `funstation-bt.service` (`pi/bt-autoconnect.sh`) reconnects paired audio devices every 15 s. Controllers reconnect by themselves once they're trusted.
 
 ## Replicating from scratch

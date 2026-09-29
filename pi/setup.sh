@@ -107,7 +107,8 @@ systemctl enable --now funstation-web funstation-bt
 
 # fast boot: quiet kernel, no first-boot/cloud/update machinery
 touch /etc/cloud/cloud-init.disabled
-sed -i 's/console=serial0,115200 //; s/ quiet loglevel=3 logo.nologo//; s/$/ quiet loglevel=3 logo.nologo/' /boot/firmware/cmdline.txt
+# Force HDMI 0 on at 1080p even if the display's hot-plug signal is missing/late (projectors powering the Pi often are)
+sed -i 's/console=serial0,115200 //; s/ quiet loglevel=3 logo.nologo.*//; s/$/ quiet loglevel=3 logo.nologo video=HDMI-A-1:1920x1080@60D/' /boot/firmware/cmdline.txt
 for u in NetworkManager-wait-online ModemManager e2scrub_reap apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer; do
   systemctl disable --now "$u" 2>/dev/null || true
 done
