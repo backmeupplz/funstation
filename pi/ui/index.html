@@ -25,6 +25,13 @@
            font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
   .navidrome .art { background: linear-gradient(135deg, #0084ff, #00c896); }
   .jellyfin .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
+  .gemflix .art { background: linear-gradient(135deg, #dc3666, #6326b5); }
+  dialog { margin: auto; padding: 4vh; max-width: 70vw; border: 0; border-radius: 2vh; background: var(--card); color: var(--fg); font-size: 2.6vh; }
+  dialog::backdrop { background: #000b; }
+  dialog p { margin: 2vh 0; }
+  dialog button { font: inherit; padding: 1vh 2vw; margin: 1vh; border: .4vh solid transparent; border-radius: 1vh; cursor: pointer; }
+  dialog button:focus { outline: none; border-color: var(--hot); background: var(--bg); color: var(--fg); }
+  #settings-error { color: #ffb4b4; }
   footer { position: fixed; bottom: 4vh; left: 5vw; right: 5vw; color: var(--dim); font-size: 2.2vh; display: flex; gap: 3vw; }
   b { color: var(--fg); }
   #busy { position: fixed; inset: 0; background: var(--bg); display: none; place-items: center; font-size: 4vh; }
@@ -35,17 +42,39 @@
 <div id="row"></div>
 <footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>Y</b> close app</span><span><b>stick</b> mouse</span><span><b>Xbox</b> home</span></footer>
 <div id="busy">Loading…</div>
+<dialog id="settings" aria-labelledby="settings-title">
+  <h2 id="settings-title">Settings</h2>
+  <p>Reboot Funstation? Running apps will close and the Pi will restart.</p>
+  <p id="settings-error" role="alert"></p>
+  <button id="cancel-reboot" autofocus>Cancel</button><button id="reboot">Reboot</button>
+</dialog>
 <script>
 const row = document.getElementById('row'), busy = document.getElementById('busy');
+const settings = document.getElementById('settings'), rebootButton = document.getElementById('reboot');
+document.getElementById('cancel-reboot').onclick = () => settings.close();
+rebootButton.onclick = async () => {
+  rebootButton.disabled = true;
+  document.getElementById('settings-error').textContent = '';
+  try {
+    const response = await fetch('/api/reboot', { method: 'POST' });
+    if (!response.ok) throw new Error('Reboot failed. Please try again.');
+    busy.textContent = 'Rebooting…'; busy.style.display = 'grid';
+    settings.close();
+  } catch (error) {
+    document.getElementById('settings-error').textContent = error.message;
+  } finally {
+    rebootButton.disabled = false;
+  }
+};
 const card = (cls, name, art, app) => {
   const c = document.createElement('div');
-  c.className = 'card ' + cls; c.tabIndex = 0; c.app = app; c.go = () => launch({ app });
+  c.className = 'card ' + cls; c.tabIndex = 0; c.setAttribute('role', 'button'); c.app = app; c.go = () => launch({ app });
   c.innerHTML = `<div class="art"><span class="ph">${art}</span></div><div class="name"></div>`;
   c.querySelector('.name').textContent = name;
   c.onmouseenter = () => c.focus();
   row.append(c); return c;
 };
-const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', '🎵'] };
+const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', '🎵'], gemflix: ['Gemflix', '💎'] };
 const cards = () => [...row.querySelectorAll('.card')];
 const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
 
@@ -54,6 +83,11 @@ function render(s) {
   const i = Math.max(cards().indexOf(document.activeElement), 0);
   row.replaceChildren();
   for (const a of s.apps) card(a, ...WEBAPPS[a], a);
+  card('settings', 'Settings', '⚙️').go = () => {
+    document.getElementById('settings-error').textContent = '';
+    settings.showModal();
+    document.getElementById('cancel-reboot').focus();
+  };
   for (const g of s.games) {
     const c = card('game', g.name, '🎮', g.file);
     const img = new Image(), url = '/cover/' + encodeURIComponent(g.file);
@@ -61,7 +95,7 @@ function render(s) {
     img.src = url;
   }
   for (const c of cards()) if ((c.running = s.running.includes(c.app))) c.querySelector('.art').insertAdjacentHTML('beforeend', '<span class="badge">▶ running</span>');
-  (cards()[Math.min(i, cards().length - 1)] || document.body).focus();
+  if (!settings.open) (cards()[Math.min(i, cards().length - 1)] || document.body).focus();
 }
 const refresh = () => fetch('/api/state').then(r => r.json()).then(render);
 refresh();
@@ -72,6 +106,15 @@ document.addEventListener('visibilitychange', () => document.hidden || back());
 addEventListener('focus', back);
 
 addEventListener('keydown', ev => {
+  if (settings.open) {
+    if (ev.altKey && ev.key === 'ArrowLeft') settings.close(); // B on the controller
+    else if (ev.key.startsWith('Arrow')) {
+      const buttons = [...settings.querySelectorAll('button:not(:disabled)')];
+      buttons[(buttons.indexOf(document.activeElement) + 1) % buttons.length]?.focus();
+    } else return; // native Enter/Space activation and Escape dismissal
+    ev.preventDefault();
+    return;
+  }
   const all = cards(), i = all.indexOf(document.activeElement);
   if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') all[Math.min(i + 1, all.length - 1)]?.focus();
   else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') all[Math.max(i - 1, 0)]?.focus();
@@ -82,7 +125,11 @@ addEventListener('keydown', ev => {
   ev.preventDefault();
 });
 // A (left click) anywhere opens the focused card, so D-pad + A works without aiming the mouse.
-addEventListener('click', ev => (ev.target.closest('.card') || document.activeElement).go?.());
+addEventListener('click', ev => {
+  if (ev.target.closest('dialog')) return;
+  if (settings.open) { document.activeElement.click(); return; }
+  (ev.target.closest('.card') || document.activeElement).go?.();
+});
 setInterval(() => document.getElementById('clock').textContent =
   new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 1000);
 </script>

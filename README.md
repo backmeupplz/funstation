@@ -4,7 +4,9 @@ A tiny family console on a Raspberry Pi 4/400. Plug it into the projector's USB 
 
 - **Jellyfin** (web client in a kiosk browser)
 - **Music** from Navidrome (its web player)
+- **Gemflix** at https://gemflix.site/ (set `GEMFLIX_URL` to override, or leave it blank to hide)
 - **GBA / GB / GBC games** through mGBA, with box art and no emulator UI
+- **Settings** with a reboot confirmation; paused games close cleanly to save before restarting
 
 You can drive it two ways:
 
@@ -28,7 +30,7 @@ See [AGENTS.md](AGENTS.md) for the full from-scratch procedure: flashing, Tailsc
 |---|---|
 | Left stick | mouse |
 | Right stick | scroll |
-| A | select (D-pad highlight) or click (stick pointer) |
+| A | select highlighted item by default; click after moving the stick |
 | B | back |
 | X | play / pause (Space) |
 | Y | close app (home screen) / right click |

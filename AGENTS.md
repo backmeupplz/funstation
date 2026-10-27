@@ -14,15 +14,16 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - `POST /api/launch {"app": "jellyfin" | "navidrome" | "<rom file>"}` opens or resumes an app
     - `POST /api/close {"app": ...}` closes an app
     - `POST /api/home` does the same as the Xbox button
+    - `POST /api/reboot` closes games cleanly and runs `sudo -n systemctl reboot`; the Settings tile asks for confirmation
   - **Apps**: an app is `launcher`, a web app id, or a ROM file name. Several can run at once.
-    - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html`. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
+    - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`, `GEMFLIX_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html`. Gemflix defaults to `https://gemflix.site/`; an explicitly blank URL hides it. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
     - Each game is its own `mgba -f` process.
     - Backgrounding an app freezes a game (SIGSTOP) or pauses the web app's `<video>`/`<audio>`, so it goes silent.
     - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
   - **Xbox button**: a tap backgrounds the current app and shows the launcher. From the launcher, it resumes the most recent app. It acts on release, so hold + D-pad up/down can be the volume combo.
   - **Controller loop** (python-evdev):
     - Outside games it grabs the pad and drives a uinput mouse and keyboard. Left stick moves the mouse and the right stick scrolls.
-    - A sends Enter if the D-pad was used last, or a click if the stick was.
+    - A starts by sending Enter to the highlighted item, and does the same if the D-pad was used last; it clicks only after the mouse stick moves.
     - B is back (Alt+Left). X is Space. Y is right click, or Delete in the launcher, which closes the selected running app. Menu is Enter, View is Esc, and the D-pad sends arrow keys.
     - LB/RB change the volume.
     - While a game is in front it releases the grab, so mGBA reads the pad directly. mGBA bindings are in the `config.ini` written by `setup.sh`.

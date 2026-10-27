@@ -11,7 +11,8 @@ from evdev import UInput, ecodes as e
 ROMS = os.path.expanduser(os.environ.get("ROMS_DIR", "~/roms"))
 JELLYFIN = os.environ.get("JELLYFIN_URL", "")
 # web apps, each in its own Chromium tab: id -> URL (unset ones are hidden)
-WEBAPPS = {k: v for k, v in (("jellyfin", JELLYFIN), ("navidrome", os.environ.get("NAVIDROME_URL", ""))) if v}
+WEBAPPS = {k: v for k, v in (("jellyfin", JELLYFIN), ("navidrome", os.environ.get("NAVIDROME_URL", "")),
+                           ("gemflix", os.environ.get("GEMFLIX_URL", "https://gemflix.site/"))) if v}
 LAUNCHER = "http://localhost:8080/"
 CDP = "http://127.0.0.1:9222"  # Chromium remote debugging, localhost only
 COVERS = os.path.expanduser("~/.cache/funstation/covers")
@@ -182,13 +183,25 @@ def home():
             open_app(bg[-1], "xbox resume")
 
 
+def reboot():
+    """Let even paused games flush their saves before asking systemd to reboot."""
+    with lock:
+        processes = list(games_running.values())
+        for p in processes:
+            p.send_signal(signal.SIGCONT)
+            p.terminate()
+        for p in processes:
+            p.wait(timeout=10)
+        subprocess.run(["sudo", "-n", "systemctl", "reboot"], check=True, capture_output=True, timeout=10)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui"), **kw)
 
-    def send_json(self, obj):
+    def send_json(self, obj, status=200):
         body = json.dumps(obj).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(body)
@@ -209,6 +222,16 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path == "/api/reboot":
+            # A site opened in another tab must not be able to reboot the Pi.
+            if self.headers.get("Origin") not in (None, "http://localhost:8080", "http://127.0.0.1:8080"):
+                return self.send_error(403)
+            try:
+                reboot()
+            except (OSError, subprocess.SubprocessError):
+                log.exception("Reboot failed")
+                return self.send_json({"error": "Could not reboot. Check that games have closed and reboot permission is available."}, 500)
+            return self.send_json({"ok": True})
         if self.path == "/api/launch":
             app = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["app"]
             threading.Thread(target=open_app, args=(app, "from launcher page"), daemon=True).start()
@@ -269,7 +292,7 @@ def pad_loop():
     pads, grabbed, axes, hat, acc = [], None, {}, {}, [0.0] * 4
     guide_held = guide_combo = False
     a_key = None  # what A is currently holding down: Enter after D-pad navigation, click after stick movement
-    nav = "mouse"
+    nav = "dpad"  # activate the highlighted item until the user moves the mouse stick
     last = time.monotonic()
     while True:
         if not pads:
