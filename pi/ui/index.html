@@ -25,6 +25,7 @@
            font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
   .navidrome .art { background: url(navidrome.png) center/70% no-repeat, linear-gradient(160deg, #1d3557, #0b1220); }
   .jellyfin .art { background: url(jellyfin.svg) center/80% no-repeat, linear-gradient(160deg, #2b1d3f, #0b1424); }
+  .settings .art { background: url(settings.svg) center/60% no-repeat, linear-gradient(160deg, #2a2f4f, #10131f); }
   .gemflix .art { background: url(gemflix.svg) center/90% no-repeat, linear-gradient(160deg, #3a1219, #0c0809); }
   dialog { margin: auto; padding: 4vh; max-width: 70vw; border: 0; border-radius: 2vh; background: var(--card); color: var(--fg); font-size: 2.6vh; }
   dialog::backdrop { background: #000b; }
@@ -83,7 +84,7 @@ function render(s) {
   const i = Math.max(cards().indexOf(document.activeElement), 0);
   row.replaceChildren();
   for (const a of s.apps) card(a, ...WEBAPPS[a], a);
-  card('settings', 'Settings', '⚙️').go = () => {
+  card('settings', 'Settings', '').go = () => {
     document.getElementById('settings-error').textContent = '';
     settings.showModal();
     document.getElementById('cancel-reboot').focus();
