@@ -53,5 +53,31 @@ class RebootTest(unittest.TestCase):
             self.assertEqual(handler.send_json.call_args.args[1], 500)
 
 
+class KeyboardTest(unittest.TestCase):
+    def press(self, code, value=1, kind=None):
+        return app.osk_event(MagicMock(type=kind or app.e.EV_KEY, code=code, value=value))
+
+    def test_dpad_moves_and_a_types(self):
+        app.osk_show((1, 0))  # q
+        with patch.object(app, "tap") as tap:
+            self.press(app.e.ABS_HAT0X, -1, app.e.EV_ABS)  # wraps to p
+            self.assertEqual(app.osk_at, (1, 9))
+            self.press(app.e.ABS_HAT0Y, 1, app.e.EV_ABS)  # down keeps the column
+            self.assertEqual(app.osk_at, (2, 9))
+            self.press(app.e.ABS_HAT0Y, 1, app.e.EV_ABS)
+            self.press(app.e.ABS_HAT0Y, 1, app.e.EV_ABS)  # into the 3-key row: right end
+            self.assertEqual(app.osk_at, (4, 2))
+            self.press(app.e.ABS_HAT0Y, -1, app.e.EV_ABS)  # back up: right end of the long row
+            self.assertEqual(app.osk_at, (3, 9))
+            self.press(app.e.BTN_SOUTH)
+            tap.assert_called_with(app.e.KEY_MINUS)
+            self.press(app.e.BTN_EAST)
+            tap.assert_called_with(app.e.KEY_BACKSPACE)
+            self.assertFalse(self.press(app.e.BTN_TL))  # LB still changes the volume
+            self.press(app.e.BTN_START)  # Menu: Enter, and the keyboard goes away
+            tap.assert_called_with(app.e.KEY_ENTER)
+        self.assertIsNone(app.osk_at)
+
+
 if __name__ == "__main__":
     unittest.main()

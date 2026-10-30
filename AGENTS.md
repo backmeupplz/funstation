@@ -5,7 +5,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
 ## Architecture
 
 - **OS**: Raspberry Pi OS Lite (Trixie, arm64). There's no desktop. tty1 autologin runs `startx /opt/funstation/xinitrc`.
-- **`pi/xinitrc`** starts `matchbox-window-manager` (fullscreen, one window at a time), `x11vnc` (localhost only) and `funstation.py` (restarted if it dies). It then runs Chromium in kiosk mode on `http://localhost:8080`, with `--remote-debugging-port=9222` (localhost) and its own profile dir `~/.config/funstation-browser` (Chromium refuses remote debugging on the default profile). It also restarts Chromium if it dies.
+- **`pi/xinitrc`** starts `matchbox-window-manager` (fullscreen, one window at a time), `x11vnc` (localhost only) and `funstation.py` (restarted if it dies). It then runs Chromium in kiosk mode on `http://localhost:8080` with `--enable-spatial-navigation` (the D-pad's arrow keys move focus between links and buttons on sites like Gemflix that have no TV mode; the launcher and Jellyfin's TV layout handle arrows themselves and `preventDefault`), with `--remote-debugging-port=9222` (localhost) and its own profile dir `~/.config/funstation-browser` (Chromium refuses remote debugging on the default profile). It also restarts Chromium if it dies.
 - **`pi/funstation.py`** is one process:
   - **HTTP server** on `127.0.0.1:8080`:
     - serves `pi/ui/index.html`
@@ -16,7 +16,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - `POST /api/home` does the same as the Xbox button
     - `POST /api/reboot` closes games cleanly and runs `sudo -n systemctl reboot`; the Settings tile asks for confirmation
   - **Apps**: an app is `launcher`, a web app id, or a ROM file name. Several can run at once.
-    - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`, `GEMFLIX_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html`. Gemflix defaults to `https://gemflix.site/`; an explicitly blank URL hides it. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
+    - Web apps are `WEBAPPS` in `funstation.py` (id → URL from `config.env`: `JELLYFIN_URL`, `NAVIDROME_URL`, `GEMFLIX_URL`), shown on the launcher via `WEBAPPS` in `ui/index.html` (card art is CSS per app id; Navidrome and Gemflix use their own logos, `ui/navidrome.png` and `ui/gemflix.svg`). Gemflix defaults to `https://gemflix.site/`; an explicitly blank URL hides it. Each runs in its own Chromium tab, logged in once by hand; the login lives in the browser profile. For Navidrome this is its built-in web player: nothing to install, and it fits the tab model, unlike Electron clients such as Feishin. Tabs are switched and closed through the DevTools HTTP endpoints (`/json/activate`, `/json/new`, `/json/close`). The same connection is used to pause media (`<video>`/`<audio>`) and to set Jellyfin's `layout=tv` localStorage key, which gives it D-pad navigation.
     - Each game is its own `mgba -f` process.
     - Backgrounding an app freezes a game (SIGSTOP) or pauses the web app's `<video>`/`<audio>`, so it goes silent.
     - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
@@ -26,8 +26,10 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - A starts by sending Enter to the highlighted item, and does the same if the D-pad was used last; it clicks only after the mouse stick moves.
     - B is back (Alt+Left). X is Space. Y is right click, or Delete in the launcher, which closes the selected running app. Menu is Enter, View is Esc, and the D-pad sends arrow keys.
     - LB/RB change the volume.
+    - **On-screen keyboard** (`OSK` in `funstation.py`, drawn by the Tk thread along the bottom of the screen): a stick press opens it, and so does an A release that leaves a text field focused in the front web app (checked over CDP 0.5 s later). While it's up it takes D-pad and button presses (`osk_event`) and types through the uinput keyboard into whatever has focus; LB/RB, the sticks and the Xbox button keep working.
     - While a game is in front it releases the grab, so mGBA reads the pad directly. mGBA bindings are in the `config.ini` written by `setup.sh`.
   - **Volume overlay**: Tk owns the main thread and shows an always-on-top override-redirect bar for 1.5 s after each change (`wpctl`).
+- **Nightly reboot**: `funstation-reboot.timer` reboots at 03:00 Pi local time (`timedatectl`), because Chromium running for days gets slow. systemd sends paused games SIGCONT with the SIGTERM, so mGBA still writes its saves.
 - **HDMI**: `setup.sh` adds `video=HDMI-A-1:1920x1080@60D` to the kernel cmdline so HDMI 0 is driven even when the display's hot-plug signal is missing or late. Projectors that power the Pi often don't assert it in time, and then the port stays "disconnected" and the screen gets no signal.
 - **Display hotplug**: `xinitrc` polls `/sys/class/drm/*HDMI*/status` and runs `xrandr --auto` when a display connects. With nothing connected, it sets a 1920×1080 virtual screen so the web mirror stays usable.
 - **Web mirror**:

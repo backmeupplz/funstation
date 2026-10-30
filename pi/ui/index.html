@@ -23,9 +23,9 @@
   .art { position: relative; }
   .badge { position: absolute; bottom: 1.5vh; left: 50%; transform: translateX(-50%); background: var(--hot); color: var(--bg);
            font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
-  .navidrome .art { background: linear-gradient(135deg, #0084ff, #00c896); }
+  .navidrome .art { background: url(navidrome.png) center/70% no-repeat, linear-gradient(160deg, #1d3557, #0b1220); }
   .jellyfin .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
-  .gemflix .art { background: linear-gradient(135deg, #dc3666, #6326b5); }
+  .gemflix .art { background: url(gemflix.svg) center/90% no-repeat, linear-gradient(160deg, #3a1219, #0c0809); }
   dialog { margin: auto; padding: 4vh; max-width: 70vw; border: 0; border-radius: 2vh; background: var(--card); color: var(--fg); font-size: 2.6vh; }
   dialog::backdrop { background: #000b; }
   dialog p { margin: 2vh 0; }
@@ -40,7 +40,7 @@
 <body>
 <header><h1>fun<span>station</span></h1><div id="clock"></div></header>
 <div id="row"></div>
-<footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>Y</b> close app</span><span><b>stick</b> mouse</span><span><b>Xbox</b> home</span></footer>
+<footer><span><b>A</b> open</span><span><b>B</b> back</span><span><b>Y</b> close app</span><span><b>stick</b> mouse</span><span><b>stick press</b> keyboard</span><span><b>Xbox</b> home</span></footer>
 <div id="busy">Loading…</div>
 <dialog id="settings" aria-labelledby="settings-title">
   <h2 id="settings-title">Settings</h2>
@@ -74,7 +74,7 @@ const card = (cls, name, art, app) => {
   c.onmouseenter = () => c.focus();
   row.append(c); return c;
 };
-const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', '🎵'], gemflix: ['Gemflix', '💎'] };
+const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', ''], gemflix: ['Gemflix', ''] };
 const cards = () => [...row.querySelectorAll('.card')];
 const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
 

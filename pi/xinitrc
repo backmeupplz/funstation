@@ -1,5 +1,6 @@
 #!/bin/sh
 # X session: kiosk WM, VNC mirror, launcher backend, Chromium (respawned if it dies).
+# Spatial navigation: arrow keys (the D-pad) move focus between links/buttons on sites without TV support.
 set -a; . /etc/funstation.env; set +a
 xset s off -dpms s noblank
 matchbox-window-manager -use_titlebar no &
@@ -15,7 +16,7 @@ x11vnc -display :0 -localhost -forever -shared -nopw -quiet -noxdamage &
 while true; do (set -a; . /etc/funstation.env; exec python3 /opt/funstation/funstation.py); sleep 1; done &  # re-reads config on restart
 while true; do
   chromium --kiosk --user-data-dir="$HOME/.config/funstation-browser" --remote-debugging-port=9222 --noerrdialogs --disable-infobars --no-first-run --password-store=basic \
-    --autoplay-policy=no-user-gesture-required --disable-features=Translate,MediaRouter \
+    --autoplay-policy=no-user-gesture-required --disable-features=Translate,MediaRouter --enable-spatial-navigation \
     --check-for-update-interval=31536000 --disk-cache-size=50000000 http://localhost:8080
   sleep 1
 done

@@ -34,11 +34,18 @@ See [AGENTS.md](AGENTS.md) for the full from-scratch procedure: flashing, Tailsc
 | B | back |
 | X | play / pause (Space) |
 | Y | close app (home screen) / right click |
+| Stick press | on-screen keyboard (it also pops up by itself when A lands on a text field) |
 | Menu | Enter |
 | View | Esc |
 | D-pad | arrow keys |
 | LB / RB | volume down / up |
 | Xbox (tap) | home, app keeps running paused; again to resume |
 | Xbox (hold) + D-pad up/down | volume, works in games too |
+
+On the keyboard: D-pad picks a key, A types it, B deletes, X is space, Menu is Enter (and closes it), View/Y close it.
+
+Web pages without TV support still get D-pad navigation: Chromium's spatial navigation moves focus between links and buttons.
+
+Funstation reboots itself every night at 3:00 (Pi's local time), since Chromium running for days gets slow.
 
 In games, the controller goes directly to mGBA: A/B, LB/RB → L/R, View → Select, Menu → Start, and the D-pad or left stick for directions.

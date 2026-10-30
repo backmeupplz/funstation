@@ -99,11 +99,28 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
+# nightly reboot at 3:00 (Pi's local time): running 24/7, Chromium gets sluggish. systemd SIGCONTs paused games
+# along with the SIGTERM, so mGBA still flushes battery saves.
+cat > /etc/systemd/system/funstation-reboot.service <<'EOF'
+[Unit]
+Description=funstation nightly reboot
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot
+EOF
+cat > /etc/systemd/system/funstation-reboot.timer <<'EOF'
+[Unit]
+Description=funstation nightly reboot
+[Timer]
+OnCalendar=*-*-* 03:00
+[Install]
+WantedBy=timers.target
+EOF
 # Xbox pads fail BLE pairing with "Authentication Failed" unless just-works re-pairing is allowed
 sed -i 's/^#\?FastConnectable.*/FastConnectable = true/; s/^#\?JustWorksRepairing.*/JustWorksRepairing = always/; s/^#\?AutoEnable.*/AutoEnable = true/' /etc/bluetooth/main.conf
 rfkill unblock bluetooth
 systemctl daemon-reload
-systemctl enable --now funstation-web funstation-bt
+systemctl enable --now funstation-web funstation-bt funstation-reboot.timer
 
 # fast boot: quiet kernel, no first-boot/cloud/update machinery
 touch /etc/cloud/cloud-init.disabled

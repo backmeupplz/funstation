@@ -24,6 +24,8 @@ games_running = {}   # rom file -> mgba Popen
 lock = threading.RLock()
 log = logging.getLogger("funstation")
 osd = queue.Queue()  # volume levels for the on-screen overlay
+osk_at = None        # on-screen keyboard: selected (row, col) while it's up, None when hidden
+osk_q = queue.Queue()  # osk_at changes for the Tk thread to draw
 
 kbd = UInput({e.EV_KEY: list(range(1, 249))}, name="funstation-kbd")
 mouse = UInput({e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
@@ -68,9 +70,10 @@ def tab(prefix):
 
 def js(t, expr):
     ws = websocket.create_connection(t["webSocketDebuggerUrl"], timeout=5, suppress_origin=True)
-    ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expr}}))
-    ws.recv()
+    ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expr, "returnByValue": True}}))
+    reply = json.loads(ws.recv())
     ws.close()
+    return reply.get("result", {}).get("result", {}).get("value")
 
 
 def raise_window(*search):
@@ -124,6 +127,8 @@ def suspend(app):
 def open_app(app, why=""):
     global fg
     log.info("open %s (fg=%s bg=%s) %s", app, fg, bg, why)
+    if osk_at:
+        osk_show(None)
     with lock:
         if fg not in ("launcher", app):  # re-opening the current app just re-shows it (e.g. after a Chromium restart)
             suspend(fg)
@@ -262,6 +267,53 @@ VOLUME = {e.BTN_TL: "5%-", e.BTN_TR: "5%+"}  # LB/RB outside games; Xbox + D-pad
 SPEED, SCROLL, DEAD = 1400.0, 12.0, 0.15  # px/s, notches/s at full tilt, stick deadzone
 
 
+# --- on-screen keyboard: D-pad picks a key, A types it into whatever has focus -----------
+OSK = [list(r) for r in ("1234567890", "qwertyuiop", "asdfghjkl'", "zxcvbnm,.-")] + [["space", "⌫", "enter"]]
+OSK_CODES = {"space": e.KEY_SPACE, "⌫": e.KEY_BACKSPACE, "enter": e.KEY_ENTER,
+             "'": e.KEY_APOSTROPHE, ",": e.KEY_COMMA, ".": e.KEY_DOT, "-": e.KEY_MINUS}
+OSK_PAD = {e.BTN_EAST: "⌫", e.BTN_NORTH: "space", e.BTN_START: "enter",  # B, X, Menu
+           e.BTN_SELECT: None, e.BTN_WEST: None, e.BTN_THUMBL: None, e.BTN_THUMBR: None}  # View, Y, stick press: hide
+EDITABLE = ("(a => a.isContentEditable || a.matches('textarea, input:not([type=button],[type=checkbox],"
+            "[type=radio],[type=submit],[type=range],[type=file])'))(document.activeElement)")
+
+
+def osk_show(at):
+    global osk_at
+    osk_at = at
+    osk_q.put(at)
+
+
+def osk_event(ev):
+    """While the keyboard is up it takes D-pad and button presses; returns False for the ones it leaves alone."""
+    r, c = osk_at
+    if ev.type == e.EV_ABS and ev.code in (e.ABS_HAT0X, e.ABS_HAT0Y) and ev.value:
+        if ev.code == e.ABS_HAT0X:
+            c = (c + ev.value) % len(OSK[r])
+        else:  # rows differ in length: keep the same relative position
+            n = (r + ev.value) % len(OSK)
+            r, c = n, round(c * (len(OSK[n]) - 1) / (len(OSK[r]) - 1))
+        osk_show((r, c))
+    elif ev.type == e.EV_KEY and ev.value == 1 and (ev.code == e.BTN_SOUTH or ev.code in OSK_PAD):
+        key = OSK[r][c] if ev.code == e.BTN_SOUTH else OSK_PAD[ev.code]
+        if key:
+            tap(OSK_CODES.get(key) or getattr(e, "KEY_" + key.upper()))
+        if not key or key == "enter":
+            osk_show(None)
+    else:
+        return False
+    return True
+
+
+def osk_auto():
+    """A put focus on a text field (e.g. a search box): bring the keyboard up."""
+    time.sleep(0.5)  # let the click land, or the page navigate and autofocus
+    try:
+        if osk_at is None and fg in WEBAPPS and js(tab(WEBAPPS[fg]), EDITABLE):
+            osk_show((1, 0))
+    except Exception:
+        pass
+
+
 def tap(*keys):
     for k in keys:
         kbd.write(e.EV_KEY, k, 1)
@@ -331,12 +383,18 @@ def pad_loop():
                         guide_combo = True
                     elif not want:
                         continue
+                    elif osk_at is not None and osk_event(ev):
+                        continue
+                    elif ev.type == e.EV_KEY and ev.code in (e.BTN_THUMBL, e.BTN_THUMBR) and ev.value == 1:
+                        osk_show((1, 0))
                     elif ev.type == e.EV_KEY and ev.code == e.BTN_SOUTH and ev.value in (0, 1):
                         if ev.value:
                             a_key = (kbd, e.KEY_ENTER) if nav == "dpad" else (mouse, e.BTN_LEFT)
                         if a_key:
                             a_key[0].write(e.EV_KEY, a_key[1], ev.value)
                             a_key[0].syn()
+                        if not ev.value:
+                            threading.Thread(target=osk_auto, daemon=True).start()
                     elif ev.type == e.EV_KEY and ev.code == e.BTN_WEST and ev.value == 1 and fg == "launcher":
                         tap(e.KEY_DELETE)  # Y in the launcher: close the selected app
                     elif ev.type == e.EV_KEY and ev.code in VOLUME and ev.value == 1:
@@ -418,7 +476,42 @@ def overlay():
             hide_at[0] = time.monotonic() + 1.5
         root.after(50, poll)
 
+    # on-screen keyboard, along the bottom of the screen
+    kb = tk.Toplevel(root)
+    kb.withdraw()
+    kb.overrideredirect(True)
+    kb.attributes("-topmost", True)
+    u = sw // 22  # key height; the 10-key rows are 10 of these wide
+    kw, kh = u * 10, u * len(OSK)
+    kb.geometry("%dx%d+%d+%d" % (kw, kh, (sw - kw) // 2, root.winfo_screenheight() - kh - u // 3))
+    kc = tk.Canvas(kb, width=kw, height=kh, bg="#0d0f1a", highlightthickness=0)
+    kc.pack()
+    kfont = ("DejaVu Sans", -(u // 3), "bold")
+
+    def draw_osk():
+        at = None
+        while not osk_q.empty():
+            at = osk_q.get_nowait()  # only the latest state matters
+        if at is None:
+            return kb.withdraw()
+        kc.delete("all")
+        for r, row in enumerate(OSK):
+            w = kw / len(row)
+            for c, k in enumerate(row):
+                on = (r, c) == at
+                kc.create_rectangle(c * w + 4, r * u + 4, (c + 1) * w - 4, (r + 1) * u - 4,
+                                    fill="#ffcc33" if on else "#1a1e33", outline="")
+                kc.create_text((c + .5) * w, (r + .5) * u, text=k, font=kfont, fill="#0d0f1a" if on else "#eef0ff")
+        kb.deiconify()
+        kb.lift()
+
+    def poll_osk():
+        if not osk_q.empty():
+            draw_osk()
+        root.after(30, poll_osk)
+
     poll()
+    poll_osk()
     root.mainloop()
 
 

@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       # Syntax only: the imports (evdev, websocket, tkinter) exist on the Pi, not here
       - run: python3 -m py_compile pi/funstation.py
+      - run: python3 -m unittest  # mocks the Pi-only imports
       - run: |
           for f in install.sh pi/setup.sh; do bash -n "$f" || exit 1; done
           for f in pi/bt-autoconnect.sh pi/xinitrc; do sh -n "$f" || exit 1; done
