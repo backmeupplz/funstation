@@ -24,7 +24,7 @@
   .badge { position: absolute; bottom: 1.5vh; left: 50%; transform: translateX(-50%); background: var(--hot); color: var(--bg);
            font-size: 2vh; font-weight: 700; padding: .4vh 1.2vh; border-radius: 1vh; white-space: nowrap; }
   .navidrome .art { background: url(navidrome.png) center/70% no-repeat, linear-gradient(160deg, #1d3557, #0b1220); }
-  .jellyfin .art { background: linear-gradient(135deg, #aa5cc3, #00a4dc); }
+  .jellyfin .art { background: url(jellyfin.svg) center/80% no-repeat, linear-gradient(160deg, #2b1d3f, #0b1424); }
   .gemflix .art { background: url(gemflix.svg) center/90% no-repeat, linear-gradient(160deg, #3a1219, #0c0809); }
   dialog { margin: auto; padding: 4vh; max-width: 70vw; border: 0; border-radius: 2vh; background: var(--card); color: var(--fg); font-size: 2.6vh; }
   dialog::backdrop { background: #000b; }
@@ -74,7 +74,7 @@ const card = (cls, name, art, app) => {
   c.onmouseenter = () => c.focus();
   row.append(c); return c;
 };
-const WEBAPPS = { jellyfin: ['Jellyfin', '🎬'], navidrome: ['Music', ''], gemflix: ['Gemflix', ''] };
+const WEBAPPS = { jellyfin: ['Jellyfin', ''], navidrome: ['Music', ''], gemflix: ['Gemflix', ''] };
 const cards = () => [...row.querySelectorAll('.card')];
 const show = () => { busy.style.display = 'grid'; setTimeout(() => busy.style.display = 'none', 15000); };
 
