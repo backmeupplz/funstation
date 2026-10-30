@@ -79,5 +79,36 @@ class KeyboardTest(unittest.TestCase):
         self.assertIsNone(app.osk_at)
 
 
+class PopupTest(unittest.TestCase):
+    def test_ad_tabs_close_and_app_comes_back(self):
+        tabs = [{"type": "page", "id": "L", "url": app.LAUNCHER},
+                {"type": "page", "id": "G", "url": "https://gemflix.site/movie/1"},
+                {"type": "page", "id": "AD", "url": "https://stake.com/?c=x"},
+                {"type": "page", "id": "X", "url": "chrome://omnibox-popup.top-chrome/"},
+                {"type": "iframe", "id": "F", "url": "https://player.example/"}]
+        calls = []
+        cdp = lambda path, method="GET": calls.append(path) or app.json.dumps(tabs).encode()
+        with patch.dict(app.WEBAPPS, {"gemflix": "https://gemflix.site/"}, clear=True), \
+                patch.object(app, "cdp", cdp), patch.object(app, "show_tab") as show, patch.object(app, "fg", "gemflix"):
+            app.close_popups()
+            show.assert_called_once_with("https://gemflix.site/")
+            self.assertEqual(calls, ["/json/list", "/json/close/AD"])
+            calls.clear(); show.reset_mock(); tabs.pop(2)
+            app.close_popups()
+            show.assert_not_called()
+            self.assertEqual(calls, ["/json/list"])
+
+
+class FramesTest(unittest.TestCase):
+    def test_nested_player_frames_belong_to_their_tab(self):
+        targets = [{"id": "P2", "type": "iframe", "parentId": "P1"},  # listed before its parent
+                   {"id": "P1", "type": "iframe", "parentId": "G"},
+                   {"id": "G", "type": "page"},
+                   {"id": "L", "type": "page"},
+                   {"id": "Y", "type": "iframe", "parentId": "L"}]
+        with patch.object(app, "cdp", return_value=app.json.dumps(targets).encode()):
+            self.assertEqual([t["id"] for t in app.frames({"id": "G"})], ["P2", "P1", "G"])
+
+
 if __name__ == "__main__":
     unittest.main()

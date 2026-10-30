@@ -76,6 +76,16 @@ def js(t, expr):
     return reply.get("result", {}).get("result", {}).get("value")
 
 
+def frames(t):
+    """The tab plus its out-of-process iframes, e.g. the video player Gemflix embeds from another site."""
+    targets, ids = json.loads(cdp("/json/list")), {t["id"]}
+    while True:
+        more = {x["id"] for x in targets if x.get("parentId") in ids} - ids
+        if not more:
+            return [x for x in targets if x["id"] in ids]
+        ids |= more
+
+
 def raise_window(*search):
     # look the id up first: chained "xdotool search ... windowactivate" silently does nothing under matchbox
     ids = subprocess.run(["xdotool", "search", *search], capture_output=True, text=True).stdout.split()
@@ -104,6 +114,28 @@ def jellyfin_tv_layout():
             pass
 
 
+def close_popups():
+    """Sites (Gemflix) open gambling ad tabs on clicks and key presses: close every page that isn't ours."""
+    ours = (LAUNCHER, *WEBAPPS.values())
+    ads = [t for t in json.loads(cdp("/json/list"))
+           if t["type"] == "page" and t["url"].startswith("http") and not t["url"].startswith(ours)]
+    for t in ads:
+        log.info("closing popup %s", t["url"])
+        cdp("/json/close/" + t["id"])
+    with lock:
+        if ads and fg not in games_running:
+            show_tab(WEBAPPS.get(fg, LAUNCHER))  # back to the app (reopened if the ad replaced its own tab)
+
+
+def popup_loop():
+    while True:
+        time.sleep(1)
+        try:
+            close_popups()
+        except OSError:
+            pass
+
+
 # --- apps: "launcher", a web app id, or a ROM file name --------------------------------
 def running():
     try:
@@ -119,7 +151,8 @@ def suspend(app):
         games_running[app].send_signal(signal.SIGSTOP)
     elif app in WEBAPPS:
         try:
-            js(tab(WEBAPPS[app]), "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
+            for t in frames(tab(WEBAPPS[app])):
+                js(t, "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
         except Exception:
             pass
 
@@ -519,5 +552,6 @@ if __name__ == "__main__":
     logging.basicConfig(filename=os.path.expanduser("~/.cache/funstation/log"), level=logging.INFO,
                         format="%(asctime)s %(threadName)s %(message)s")
     threading.Thread(target=pad_loop, daemon=True).start()
+    threading.Thread(target=popup_loop, daemon=True).start()
     threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", 8080), Handler).serve_forever, daemon=True).start()
     overlay()

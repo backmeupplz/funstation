@@ -21,10 +21,19 @@ install -m755 funstation.py xinitrc bt-autoconnect.sh /opt/funstation/
 install -m644 ui/* /opt/funstation/ui/
 install -m644 funstation.env /etc/funstation.env
 
-# Chromium: no translate/password prompts. Remote debugging needs a non-default profile dir, so keep the old
+# Chromium: no translate/password/location/notification prompts, no popups without a click, and uBlock Origin Lite
+# (complete filtering, popup blocking, no first-run tab) because Gemflix is full of gambling ads. Remote debugging needs a non-default profile dir, so keep the old
 # profile (and its Jellyfin login) by moving it there.
 install -d /etc/chromium/policies/managed
-echo '{"TranslateEnabled":false,"PasswordManagerEnabled":false}' > /etc/chromium/policies/managed/funstation.json
+cat > /etc/chromium/policies/managed/funstation.json <<'EOF'
+{
+  "TranslateEnabled": false, "PasswordManagerEnabled": false,
+  "DefaultGeolocationSetting": 2, "DefaultNotificationsSetting": 2, "DefaultPopupsSetting": 2,
+  "ExtensionInstallForcelist": ["ddkjiahejlhfcafbddmgiahcphecmpfh;https://clients2.google.com/service/update2/crx"],
+  "3rdparty": {"extensions": {"ddkjiahejlhfcafbddmgiahcphecmpfh": {
+    "defaultFiltering": "complete", "popupBlockMode": true, "disableFirstRunPage": true}}}
+}
+EOF
 [ -d "$H/.config/chromium" ] && [ ! -e "$H/.config/funstation-browser" ] && mv "$H/.config/chromium" "$H/.config/funstation-browser"
 
 # mGBA: fullscreen, correct 3:2 shape, no pause when focus changes
