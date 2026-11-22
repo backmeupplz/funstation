@@ -130,6 +130,12 @@ sed -i 's/^#\?FastConnectable.*/FastConnectable = true/; s/^#\?JustWorksRepairin
 rfkill unblock bluetooth
 systemctl daemon-reload
 systemctl enable --now funstation-web funstation-bt funstation-reboot.timer
+systemctl restart funstation-bt  # pick up a changed script
+
+# keep the journal across reboots (nightly, power cuts) so "it got bad yesterday" can be looked into, capped
+install -d /var/log/journal /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=100M\n' > /etc/systemd/journald.conf.d/funstation.conf
+systemctl restart systemd-journald
 
 # fast boot: quiet kernel, no first-boot/cloud/update machinery
 touch /etc/cloud/cloud-init.disabled

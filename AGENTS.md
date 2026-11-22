@@ -21,7 +21,7 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
     - Each game is its own `mgba -f` process.
     - Backgrounding an app freezes a game (SIGSTOP) or pauses the web app's `<video>`/`<audio>`, including inside its cross-site iframes (`frames()`: Gemflix's player and YouTube trailers), so it goes silent.
     - Windows are brought to the front with `xdotool windowactivate <id>`. Look up the id first: chained `xdotool search … windowactivate` does nothing under matchbox, and matchbox unmaps windows that aren't in front.
-  - **Xbox button**: a tap backgrounds the current app and shows the launcher. From the launcher, it resumes the most recent app. It acts on release, so hold + D-pad up/down can be the volume combo.
+  - **Xbox button**: a tap backgrounds the current app and shows the launcher. From the launcher, it resumes the most recent app. It acts on release, so hold + D-pad up/down can be the volume combo. Presses that arrive while a switch is still running, or within 0.5 s of the last one, are dropped (`home`). Otherwise queued presses would flip launcher ↔ app over and over, and Bluetooth sometimes delivers one press twice a few ms apart. The new app is shown first and the old one is paused afterwards, off the lock (`pause_media`), because a busy page can take the full 5 s CDP timeout to answer.
   - **Controller loop** (python-evdev):
     - Outside games it grabs the pad and drives a uinput mouse and keyboard. Left stick moves the mouse and the right stick scrolls.
     - A starts by sending Enter to the highlighted item, and does the same if the D-pad was used last; it clicks only after the mouse stick moves.
@@ -37,8 +37,8 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
   - `funstation-web.service` runs websockify and noVNC on `127.0.0.1:6080`.
   - `tailscale serve --bg --https=443 http://127.0.0.1:6080` publishes it at `https://<host>.<tailnet>.ts.net/`.
   - `/usr/share/novnc/index.html` redirects to `vnc.html?autoconnect=1&resize=scale`.
-- **Wi-Fi**: use a **5 GHz** network. On the Pi, Wi-Fi and Bluetooth share one radio chip, and on 2.4 GHz they also share the airwaves. Streaming to a Bluetooth speaker then causes Wi-Fi jitter (seen: 1–64 ms to the router), giving choppy video and stuttering audio. Add 5 GHz as a higher-`autoconnect-priority` NetworkManager connection and keep 2.4 GHz as a fallback.
-- **Audio**: PipeWire with the bluez plugin. A Bluetooth speaker becomes the default output once it connects. `funstation-bt.service` (`pi/bt-autoconnect.sh`) reconnects paired audio devices every 15 s. Controllers reconnect by themselves once they're trusted.
+- **Wi-Fi**: use a **5 GHz** network. On the Pi, Wi-Fi and Bluetooth share one radio chip, and on 2.4 GHz they also share the airwaves. Streaming to a Bluetooth speaker then causes Wi-Fi jitter (seen: 1–64 ms to the router), giving choppy video and stuttering audio. Add 5 GHz as a higher-`autoconnect-priority` NetworkManager connection and keep 2.4 GHz as a fallback. NetworkManager never leaves a working network for a better one, so `pi/bt-autoconnect.sh` switches back to the highest-priority Wi-Fi once it's in range. Without that, a 5 GHz dropout at night left the Pi on 2.4 GHz all day.
+- **Audio**: PipeWire with the bluez plugin. A Bluetooth speaker becomes the default output once it connects. `funstation-bt.service` (`pi/bt-autoconnect.sh`) reconnects paired audio devices every 15 s (and moves Wi-Fi back to 5 GHz, see above). Controllers reconnect by themselves once they're trusted.
 
 ## Replicating from scratch
 
@@ -65,7 +65,8 @@ A Raspberry Pi 4/400 (a Zero 2 W should work too) plugged into a TV/projector ov
 
 ## Debugging on the Pi
 
-- Launcher/pad logs: the X session has no journal. `pkill -f '^python3 /opt/funstation/funstation.py'` and xinitrc restarts it; to see output, run it by hand with `DISPLAY=:0` and `/etc/funstation.env` loaded.
+- The journal persists across reboots (`journalctl --list-boots`, `journalctl -b -1`, capped at 100 MB).
+- Launcher/pad logs: `~/.cache/funstation/log` (the X session has no journal). `pkill -f '^python3 /opt/funstation/funstation.py'` and xinitrc restarts it; to see output, run it by hand with `DISPLAY=:0` and `/etc/funstation.env` loaded.
 - Drive it without a controller: `curl -XPOST localhost:8080/api/launch -d '{"app":"jellyfin"}'`, `curl -XPOST localhost:8080/api/home`, `DISPLAY=:0 xdotool key Right`.
 - Screen: open the web mirror, or `DISPLAY=:0 scrot -o /tmp/s.png` (`apt install scrot`).
 - Boot time: `systemd-analyze` and `systemd-analyze blame`.

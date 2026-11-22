@@ -99,13 +99,39 @@ class PopupTest(unittest.TestCase):
             self.assertEqual(calls, ["/json/list"])
 
 
+class HomeTest(unittest.TestCase):
+    def test_stuck_page_neither_delays_the_launcher_nor_queues_presses(self):
+        shown = []
+        stuck = app.threading.Event()
+        frames = lambda t: stuck.wait(5) and []  # Jellyfin's page not answering CDP
+        with patch.object(app, "show_tab", shown.append), patch.object(app, "tab"), patch.object(app, "frames", frames), \
+                patch.object(app, "fg", "jellyfin"), patch.object(app, "bg", []), \
+                patch.dict(app.WEBAPPS, {"jellyfin": "https://jf/"}, clear=True), patch.object(app, "home_done", 0.0):
+            t0 = app.time.monotonic()
+            presses = [app.threading.Thread(target=app.home) for _ in range(5)]  # mashing, plus a Bluetooth double
+            for p in presses:
+                p.start()
+            for p in presses:
+                p.join()
+            self.assertLess(app.time.monotonic() - t0, 1)
+            self.assertEqual(shown, [app.LAUNCHER])
+            self.assertEqual((app.fg, app.bg), ("launcher", ["jellyfin"]))
+            app.home()  # still inside the 0.5 s window: dropped
+            self.assertEqual(shown, [app.LAUNCHER])
+            app.home_done = 0.0
+            app.home()  # a real second press resumes Jellyfin
+            self.assertEqual(shown, [app.LAUNCHER, "https://jf/"])
+            stuck.set()
+
+
 class FramesTest(unittest.TestCase):
     def test_nested_player_frames_belong_to_their_tab(self):
         targets = [{"id": "P2", "type": "iframe", "parentId": "P1"},  # listed before its parent
                    {"id": "P1", "type": "iframe", "parentId": "G"},
                    {"id": "G", "type": "page"},
                    {"id": "L", "type": "page"},
-                   {"id": "Y", "type": "iframe", "parentId": "L"}]
+                   {"id": "Y", "type": "iframe", "parentId": "L"},
+                   {"id": "W", "type": "worker", "parentId": "G"}]  # Jellyfin's worker never answers
         with patch.object(app, "cdp", return_value=app.json.dumps(targets).encode()):
             self.assertEqual([t["id"] for t in app.frames({"id": "G"})], ["P2", "P1", "G"])
 

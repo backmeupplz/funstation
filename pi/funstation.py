@@ -77,8 +77,9 @@ def js(t, expr):
 
 
 def frames(t):
-    """The tab plus its out-of-process iframes, e.g. the video player Gemflix embeds from another site."""
-    targets, ids = json.loads(cdp("/json/list")), {t["id"]}
+    """The tab plus its out-of-process iframes, e.g. the video player Gemflix embeds from another site.
+    Not workers: Jellyfin's never answers Runtime.evaluate, so every pause used to wait out the 5 s timeout."""
+    targets, ids = [x for x in json.loads(cdp("/json/list")) if x["type"] in ("page", "iframe")], {t["id"]}
     while True:
         more = {x["id"] for x in targets if x.get("parentId") in ids} - ids
         if not more:
@@ -150,11 +151,18 @@ def suspend(app):
     if app in games_running:
         games_running[app].send_signal(signal.SIGSTOP)
     elif app in WEBAPPS:
-        try:
-            for t in frames(tab(WEBAPPS[app])):
-                js(t, "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
-        except Exception:
-            pass
+        threading.Thread(target=pause_media, args=(app,), daemon=True).start()
+
+
+def pause_media(app):
+    """Off the lock: a busy page can take seconds to answer (CDP times out after 5 s) and must not hold up switching."""
+    try:
+        for t in frames(tab(WEBAPPS[app])):
+            if fg == app:  # brought back meanwhile
+                return
+            js(t, "document.querySelectorAll('video,audio').forEach(m=>m.pause())")
+    except Exception as ex:
+        log.info("pausing %s failed: %r", app, ex)
 
 
 def open_app(app, why=""):
@@ -163,9 +171,6 @@ def open_app(app, why=""):
     if osk_at:
         osk_show(None)
     with lock:
-        if fg not in ("launcher", app):  # re-opening the current app just re-shows it (e.g. after a Chromium restart)
-            suspend(fg)
-            bg.append(fg)
         if app in games_running:
             games_running[app].send_signal(signal.SIGCONT)
             raise_window("--pid", str(games_running[app].pid))
@@ -178,9 +183,12 @@ def open_app(app, why=""):
             threading.Thread(target=watch_game, args=(app, p), daemon=True).start()
         else:
             return
+        prev, fg = fg, app  # the new app is already on screen: quieting the old one can't delay it
+        if prev not in ("launcher", app):  # re-opening the current app just re-shows it (e.g. after a Chromium restart)
+            suspend(prev)
+            bg.append(prev)
         if app in bg:
             bg.remove(app)
-        fg = app
 
 
 def close_app(app):
@@ -212,13 +220,38 @@ def watch_game(app, p):
             show_tab(LAUNCHER)
 
 
+home_busy = threading.Lock()
+home_done = 0.0
+
+
 def home():
     """Xbox button: background the current app and show the launcher; from the launcher, resume the last app."""
-    with lock:
-        if fg != "launcher":
-            open_app("launcher", "xbox")
-        elif bg:
-            open_app(bg[-1], "xbox resume")
+    global home_done
+    # Drop presses that land while a switch is still running or right after one: queued up, each would flip
+    # launcher <-> app again, and Bluetooth sometimes delivers one press twice a few ms apart.
+    if time.monotonic() - home_done < 0.5 or not home_busy.acquire(blocking=False):
+        return log.info("xbox press dropped")
+    try:
+        with lock:
+            if fg != "launcher":
+                open_app("launcher", "xbox")
+            elif bg:
+                open_app(bg[-1], "xbox resume")
+    finally:
+        home_done = time.monotonic()
+        home_busy.release()
+
+
+def restore():
+    """After a restart (deploy, crash) the web apps are still open in Chromium: go home and keep them resumable,
+    or the screen shows an app while fg says launcher and the Xbox button does nothing."""
+    bg[:] = running()
+    try:
+        show_tab(LAUNCHER)
+    except OSError:
+        return  # Chromium isn't up yet (boot): it opens on the launcher anyway
+    for a in bg:
+        suspend(a)
 
 
 def reboot():
@@ -554,4 +587,5 @@ if __name__ == "__main__":
     threading.Thread(target=pad_loop, daemon=True).start()
     threading.Thread(target=popup_loop, daemon=True).start()
     threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", 8080), Handler).serve_forever, daemon=True).start()
+    restore()
     overlay()
